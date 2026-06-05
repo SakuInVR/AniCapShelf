@@ -63,6 +63,12 @@ python -m anicapshelf --db .\anicapshelf.db review-ambiguous --limit 20 --show-c
 python -m anicapshelf --db .\anicapshelf.db probe-subtitles --limit 40
 ```
 
+録画DBに ARIB 字幕の有無を保存します。
+
+```powershell
+python -m anicapshelf --db .\anicapshelf.db probe-recording-captions --only-unknown --limit 100
+```
+
 録画1本から字幕の一部を抽出します。
 
 ```powershell

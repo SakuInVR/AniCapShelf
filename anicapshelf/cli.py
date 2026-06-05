@@ -70,7 +70,7 @@ def cmd_scan_records(args: argparse.Namespace) -> None:
             updated += 1
         has_caption = None
         if args.probe_subtitles:
-            has_caption = 1 if has_arib_caption(path) else 0
+            has_caption = 1 if has_arib_caption(path, args.probe_timeout) else 0
             caption_count += int(bool(has_caption))
         conn.execute(
             """
@@ -230,12 +230,54 @@ def cmd_probe_subtitles(args: argparse.Namespace) -> None:
     files = list(iter_files(root, RECORDING_EXTS))[: args.limit]
     count = 0
     for path in files:
-        if has_arib_caption(path):
+        if has_arib_caption(path, args.timeout):
             count += 1
             print(f"caption: {path}")
         elif args.verbose:
             print(f"no caption: {path}")
     print(f"sampled={len(files)} arib_caption={count}")
+
+
+def cmd_probe_recording_captions(args: argparse.Namespace) -> None:
+    conn = connect(args.db)
+    init_db(conn)
+    query = """
+        SELECT id, path
+        FROM recordings
+        WHERE path IS NOT NULL
+        ORDER BY id
+    """
+    if args.only_unknown:
+        query = """
+            SELECT id, path
+            FROM recordings
+            WHERE path IS NOT NULL AND has_arib_caption IS NULL
+            ORDER BY id
+        """
+    rows = conn.execute(query).fetchall()
+    if args.limit:
+        rows = rows[: args.limit]
+    checked = 0
+    found = 0
+    missing = 0
+    for row in rows:
+        checked += 1
+        has_caption = has_arib_caption(row["path"], args.timeout)
+        found += int(has_caption)
+        missing += int(not has_caption)
+        conn.execute(
+            "UPDATE recordings SET has_arib_caption = ? WHERE id = ?",
+            (1 if has_caption else 0, row["id"]),
+        )
+        if args.verbose:
+            label = "caption" if has_caption else "no-caption"
+            print(f"{label}: {row['path']}")
+        if checked % args.commit_every == 0:
+            conn.commit()
+    conn.commit()
+    print(f"recordings checked: {checked}")
+    print(f"arib_caption: {found}")
+    print(f"without_arib_caption: {missing}")
 
 
 def cmd_extract_subtitles(args: argparse.Namespace) -> None:
@@ -433,6 +475,7 @@ def build_parser() -> argparse.ArgumentParser:
     records = sub.add_parser("scan-records")
     records.add_argument("--records-root")
     records.add_argument("--probe-subtitles", action="store_true")
+    records.add_argument("--probe-timeout", type=int, default=30)
     records.set_defaults(func=cmd_scan_records)
 
     captures = sub.add_parser("scan-captures")
@@ -446,8 +489,17 @@ def build_parser() -> argparse.ArgumentParser:
     probe = sub.add_parser("probe-subtitles")
     probe.add_argument("--records-root")
     probe.add_argument("--limit", type=int, default=40)
+    probe.add_argument("--timeout", type=int, default=30)
     probe.add_argument("--verbose", action="store_true")
     probe.set_defaults(func=cmd_probe_subtitles)
+
+    probe_db = sub.add_parser("probe-recording-captions")
+    probe_db.add_argument("--limit", type=int)
+    probe_db.add_argument("--timeout", type=int, default=30)
+    probe_db.add_argument("--commit-every", type=int, default=25)
+    probe_db.add_argument("--only-unknown", action="store_true")
+    probe_db.add_argument("--verbose", action="store_true")
+    probe_db.set_defaults(func=cmd_probe_recording_captions)
 
     extract = sub.add_parser("extract-subtitles")
     extract.add_argument("--recording-id", type=int, required=True)

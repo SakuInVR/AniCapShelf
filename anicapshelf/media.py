@@ -22,24 +22,28 @@ def ffmpeg_path() -> str:
     return path
 
 
-def probe_streams(path: str | Path) -> list[dict]:
-    proc = subprocess.run(
-        [
-            ffprobe_path(),
-            "-v",
-            "error",
-            "-show_entries",
-            "stream=index,codec_type,codec_name",
-            "-of",
-            "json",
-            str(path),
-        ],
-        check=False,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    )
+def probe_streams(path: str | Path, timeout: int = 30) -> list[dict]:
+    try:
+        proc = subprocess.run(
+            [
+                ffprobe_path(),
+                "-v",
+                "error",
+                "-show_entries",
+                "stream=index,codec_type,codec_name",
+                "-of",
+                "json",
+                str(path),
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        return []
     if proc.returncode != 0:
         return []
     try:
@@ -48,8 +52,10 @@ def probe_streams(path: str | Path) -> list[dict]:
         return []
 
 
-def has_arib_caption(path: str | Path) -> bool:
-    return any(stream.get("codec_name") == "arib_caption" for stream in probe_streams(path))
+def has_arib_caption(path: str | Path, timeout: int = 30) -> bool:
+    return any(
+        stream.get("codec_name") == "arib_caption" for stream in probe_streams(path, timeout)
+    )
 
 
 def extract_srt(path: str | Path, seconds: int | None = None, timeout: int = 180) -> str:
