@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 
 from anicapshelf.cli import main
@@ -159,3 +160,46 @@ def test_export_captures_csv_file(tmp_path: Path, capsys):
     )
 
     assert "Capture_20260115-015919.jpg" in output_path.read_text(encoding="utf-8")
+
+
+def test_match_marks_one_best_candidate(tmp_path: Path, capsys):
+    records_root = tmp_path / "records"
+    captures_root = tmp_path / "captures"
+    records_root.mkdir()
+    captures_root.mkdir()
+    previous = records_root / "2026年01月10日01時30分00秒-前番組　第１話.m2ts"
+    current = records_root / "2026年01月10日02時00分00秒-本命番組　第１話.m2ts"
+    capture = captures_root / "Capture_20260110-020004.jpg"
+    previous.write_bytes(b"recording")
+    current.write_bytes(b"recording")
+    capture.write_bytes(b"capture")
+
+    import os
+    import sqlite3
+
+    previous_mtime = datetime(2026, 1, 10, 2, 0, 3).timestamp()
+    current_mtime = datetime(2026, 1, 10, 2, 30, 0).timestamp()
+    capture_mtime = datetime(2026, 1, 10, 2, 0, 4).timestamp()
+    os.utime(previous, (previous_mtime, previous_mtime))
+    os.utime(current, (current_mtime, current_mtime))
+    os.utime(capture, (capture_mtime, capture_mtime))
+
+    db_path = tmp_path / "test.db"
+    main(["--db", str(db_path), "scan-records", "--records-root", str(records_root)])
+    main(["--db", str(db_path), "scan-captures", "--captures-root", str(captures_root)])
+    main(["--db", str(db_path), "match", "--window-minutes", "2"])
+    capsys.readouterr()
+
+    con = sqlite3.connect(db_path)
+    rows = con.execute(
+        """
+        SELECT r.title, m.is_best
+        FROM capture_recording_matches m
+        JOIN recordings r ON r.id = m.recording_id
+        ORDER BY m.is_best DESC, r.title
+        """
+    ).fetchall()
+    con.close()
+
+    assert len(rows) == 2
+    assert rows[0] == ("本命番組　第１話", 1)

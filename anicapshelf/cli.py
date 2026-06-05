@@ -224,15 +224,25 @@ def cmd_match(args: argparse.Namespace) -> None:
         if hits:
             matched += 1
             candidates += len(hits)
+        scored_hits = []
         for recording_id, source_seconds in hits:
             confidence = 0.9 if source_seconds >= 0 else 0.6
+            scored_hits.append((recording_id, source_seconds, confidence))
+        best = sorted(scored_hits, key=lambda item: (-item[2], abs(item[1])))[0] if scored_hits else None
+        for recording_id, source_seconds, confidence in scored_hits:
             conn.execute(
                 """
                 INSERT OR REPLACE INTO capture_recording_matches (
-                    capture_id, recording_id, source_time_seconds, confidence, method
-                ) VALUES (?, ?, ?, ?, 'time-window')
+                    capture_id, recording_id, source_time_seconds, confidence, is_best, method
+                ) VALUES (?, ?, ?, ?, ?, 'time-window')
                 """,
-                (capture["id"], recording_id, source_seconds, confidence),
+                (
+                    capture["id"],
+                    recording_id,
+                    source_seconds,
+                    confidence,
+                    1 if best and recording_id == best[0] else 0,
+                ),
             )
     conn.commit()
     print(f"captures considered: {len(captures)}")
@@ -511,12 +521,13 @@ def cmd_review_ambiguous(args: argparse.Namespace) -> None:
                 SELECT
                     ROUND(m.source_time_seconds, 1) AS source_time_seconds,
                     m.confidence,
+                    m.is_best,
                     r.title,
                     r.path
                 FROM capture_recording_matches m
                 JOIN recordings r ON r.id = m.recording_id
                 WHERE m.capture_id = ?
-                ORDER BY m.confidence DESC, ABS(m.source_time_seconds) ASC
+                ORDER BY m.is_best DESC, m.confidence DESC, ABS(m.source_time_seconds) ASC
                 """,
                 (row["capture_id"],),
             ).fetchall()
@@ -525,6 +536,7 @@ def cmd_review_ambiguous(args: argparse.Namespace) -> None:
                     "  - "
                     + "\t".join(
                         [
+                            "best" if candidate["is_best"] else "candidate",
                             str(candidate["source_time_seconds"]),
                             str(candidate["confidence"]),
                             candidate["title"] or "",
@@ -547,11 +559,12 @@ EXPORT_QUERIES = {
             r.title,
             m.source_time_seconds,
             m.confidence,
+            m.is_best,
             m.method
         FROM capture_recording_matches m
         JOIN captures c ON c.id = m.capture_id
         JOIN recordings r ON r.id = m.recording_id
-        ORDER BY m.capture_id, m.confidence DESC, m.recording_id
+        ORDER BY m.capture_id, m.is_best DESC, m.confidence DESC, m.recording_id
     """,
     "streams": "SELECT * FROM recording_streams ORDER BY recording_id, stream_index",
     "subtitles": "SELECT * FROM subtitles ORDER BY recording_id, start_seconds",
