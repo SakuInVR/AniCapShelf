@@ -8,7 +8,14 @@ from pathlib import Path
 
 from .config import load_config
 from .db import connect, init_db
-from .media import extract_srt, extract_srt_preview, has_arib_caption, parse_srt
+from .media import (
+    extract_srt,
+    extract_srt_preview,
+    has_arib_caption,
+    parse_srt,
+    probe_streams,
+    stream_to_json,
+)
 from .parsers import parse_capture_time, parse_recording_name
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png"}
@@ -280,6 +287,57 @@ def cmd_probe_recording_captions(args: argparse.Namespace) -> None:
     print(f"without_arib_caption: {missing}")
 
 
+def cmd_probe_recording_streams(args: argparse.Namespace) -> None:
+    conn = connect(args.db)
+    init_db(conn)
+    rows = conn.execute(
+        """
+        SELECT id, path
+        FROM recordings
+        WHERE path IS NOT NULL
+        ORDER BY id
+        """
+    ).fetchall()
+    if args.limit:
+        rows = rows[: args.limit]
+    checked = 0
+    streams_saved = 0
+    no_streams = 0
+    for row in rows:
+        checked += 1
+        streams = probe_streams(row["path"], args.timeout)
+        if not streams:
+            no_streams += 1
+        conn.execute("DELETE FROM recording_streams WHERE recording_id = ?", (row["id"],))
+        for stream in streams:
+            stream_index = stream.get("index")
+            if stream_index is None:
+                continue
+            conn.execute(
+                """
+                INSERT INTO recording_streams (
+                    recording_id, stream_index, codec_type, codec_name, raw_json
+                ) VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    row["id"],
+                    stream_index,
+                    stream.get("codec_type"),
+                    stream.get("codec_name"),
+                    stream_to_json(stream),
+                ),
+            )
+            streams_saved += 1
+        if args.verbose:
+            print(f"{len(streams)} streams: {row['path']}")
+        if checked % args.commit_every == 0:
+            conn.commit()
+    conn.commit()
+    print(f"recordings checked: {checked}")
+    print(f"streams saved: {streams_saved}")
+    print(f"recordings without streams: {no_streams}")
+
+
 def cmd_extract_subtitles(args: argparse.Namespace) -> None:
     conn = connect(args.db)
     init_db(conn)
@@ -357,6 +415,7 @@ def cmd_report(args: argparse.Namespace) -> None:
         "recordings_with_title": "SELECT COUNT(*) FROM recordings WHERE title IS NOT NULL",
         "recordings_with_episode": "SELECT COUNT(*) FROM recordings WHERE episode_token IS NOT NULL",
         "recordings_with_arib_caption": "SELECT COUNT(*) FROM recordings WHERE has_arib_caption = 1",
+        "recording_streams": "SELECT COUNT(*) FROM recording_streams",
         "captures": "SELECT COUNT(*) FROM captures",
         "captures_matched": "SELECT COUNT(DISTINCT capture_id) FROM capture_recording_matches",
         "match_candidates": "SELECT COUNT(*) FROM capture_recording_matches",
@@ -500,6 +559,13 @@ def build_parser() -> argparse.ArgumentParser:
     probe_db.add_argument("--only-unknown", action="store_true")
     probe_db.add_argument("--verbose", action="store_true")
     probe_db.set_defaults(func=cmd_probe_recording_captions)
+
+    streams = sub.add_parser("probe-recording-streams")
+    streams.add_argument("--limit", type=int)
+    streams.add_argument("--timeout", type=int, default=30)
+    streams.add_argument("--commit-every", type=int, default=25)
+    streams.add_argument("--verbose", action="store_true")
+    streams.set_defaults(func=cmd_probe_recording_streams)
 
     extract = sub.add_parser("extract-subtitles")
     extract.add_argument("--recording-id", type=int, required=True)

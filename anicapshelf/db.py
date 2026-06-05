@@ -26,6 +26,20 @@ CREATE TABLE IF NOT EXISTS recordings (
 CREATE INDEX IF NOT EXISTS idx_recordings_start_end ON recordings(start_at, end_at);
 CREATE INDEX IF NOT EXISTS idx_recordings_title ON recordings(title);
 
+CREATE TABLE IF NOT EXISTS recording_streams (
+    recording_id INTEGER NOT NULL,
+    stream_index INTEGER NOT NULL,
+    codec_type TEXT,
+    codec_name TEXT,
+    raw_json TEXT NOT NULL,
+    probed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (recording_id, stream_index),
+    FOREIGN KEY (recording_id) REFERENCES recordings(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_recording_streams_type
+ON recording_streams(recording_id, codec_type, codec_name);
+
 CREATE TABLE IF NOT EXISTS captures (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     path TEXT NOT NULL UNIQUE,

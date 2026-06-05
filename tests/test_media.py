@@ -1,4 +1,6 @@
-from anicapshelf.media import clean_caption_text, parse_srt
+import json
+
+from anicapshelf.media import clean_caption_text, parse_srt, stream_to_json
 
 
 def test_clean_caption_text_removes_ruby_and_style_tags():
@@ -28,3 +30,8 @@ def test_parse_srt_drops_empty_cues_and_bogus_long_end_time():
     assert rows[0]["end"] is None
     assert rows[0]["text"] == "時間遡行者 暁美ほむら｡"
 
+
+def test_stream_to_json_preserves_japanese_text():
+    raw = stream_to_json({"index": 2, "codec_name": "arib_caption", "title": "字幕"})
+
+    assert json.loads(raw)["title"] == "字幕"

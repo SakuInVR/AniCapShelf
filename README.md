@@ -69,6 +69,12 @@ python -m anicapshelf --db .\anicapshelf.db probe-subtitles --limit 40
 python -m anicapshelf --db .\anicapshelf.db probe-recording-captions --only-unknown --limit 100
 ```
 
+録画DBに ffprobe のストリーム情報を保存します。
+
+```powershell
+python -m anicapshelf --db .\anicapshelf.db probe-recording-streams --limit 100
+```
+
 録画1本から字幕の一部を抽出します。
 
 ```powershell

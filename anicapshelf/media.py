@@ -58,6 +58,10 @@ def has_arib_caption(path: str | Path, timeout: int = 30) -> bool:
     )
 
 
+def stream_to_json(stream: dict) -> str:
+    return json.dumps(stream, ensure_ascii=False, sort_keys=True)
+
+
 def extract_srt(path: str | Path, seconds: int | None = None, timeout: int = 180) -> str:
     cmd = [ffmpeg_path(), "-nostdin", "-hide_banner", "-loglevel", "warning"]
     if seconds:
