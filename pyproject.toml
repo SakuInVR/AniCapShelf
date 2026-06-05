@@ -1,0 +1,13 @@
+[project]
+name = "anicapshelf"
+version = "0.1.0"
+description = "Local-first anime capture and recorded TV scene index"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+anicapshelf = "anicapshelf.cli:main"
+
+[tool.ruff]
+line-length = 100
+
