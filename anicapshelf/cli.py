@@ -8,6 +8,7 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 
+from .api import run_server
 from .config import load_config
 from .db import connect, init_db
 from .media import (
@@ -442,6 +443,7 @@ def cmd_report(args: argparse.Namespace) -> None:
         "captures": "SELECT COUNT(*) FROM captures",
         "captures_matched": "SELECT COUNT(DISTINCT capture_id) FROM capture_recording_matches",
         "match_candidates": "SELECT COUNT(*) FROM capture_recording_matches",
+        "capture_annotations": "SELECT COUNT(*) FROM capture_annotations",
         "subtitles": "SELECT COUNT(*) FROM subtitles",
         "sharex_history": "SELECT COUNT(*) FROM sharex_history",
     }
@@ -566,6 +568,25 @@ EXPORT_QUERIES = {
         JOIN recordings r ON r.id = m.recording_id
         ORDER BY m.capture_id, m.is_best DESC, m.confidence DESC, m.recording_id
     """,
+    "annotations": """
+        SELECT
+            a.id,
+            a.capture_id,
+            c.path AS capture_path,
+            a.source_app,
+            a.external_program_id,
+            a.external_video_id,
+            a.recording_file_path,
+            a.playback_position_seconds,
+            a.source_url,
+            a.tags_json,
+            a.note,
+            a.metadata_json,
+            a.created_at
+        FROM capture_annotations a
+        JOIN captures c ON c.id = a.capture_id
+        ORDER BY a.id
+    """,
     "streams": "SELECT * FROM recording_streams ORDER BY recording_id, stream_index",
     "subtitles": "SELECT * FROM subtitles ORDER BY recording_id, start_seconds",
     "sharex": "SELECT * FROM sharex_history ORDER BY id",
@@ -598,6 +619,19 @@ def cmd_export(args: argparse.Namespace) -> None:
         print(f"exported {len(rows)} rows: {output_path}")
     else:
         print(content, end="")
+
+
+def cmd_serve_api(args: argparse.Namespace) -> None:
+    config = load_config(args.config)
+    capture_output_root = args.capture_output_root or config.captures_root
+    if not capture_output_root:
+        raise SystemExit("--capture-output-root または設定ファイルの roots.captures が必要です")
+    run_server(
+        host=args.host,
+        port=args.port,
+        db_path=args.db,
+        capture_output_root=capture_output_root,
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -679,6 +713,15 @@ def build_parser() -> argparse.ArgumentParser:
     export.add_argument("--format", choices=["jsonl", "csv"], default="jsonl")
     export.add_argument("--output")
     export.set_defaults(func=cmd_export)
+
+    api = sub.add_parser("serve-api")
+    api.add_argument("--host", default="127.0.0.1")
+    api.add_argument("--port", type=int, default=8765)
+    api.add_argument(
+        "--capture-output-root",
+        help="アノテーションAPIで受け取った画像の保存先。未指定時は roots.captures を使います。",
+    )
+    api.set_defaults(func=cmd_serve_api)
 
     return parser
 

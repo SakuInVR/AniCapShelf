@@ -64,7 +64,20 @@ python -m anicapshelf --db .\anicapshelf.db review-ambiguous --limit 20 --show-c
 ```powershell
 python -m anicapshelf --db .\anicapshelf.db export matches --format jsonl --output .\matches.jsonl
 python -m anicapshelf --db .\anicapshelf.db export captures --format csv --output .\captures.csv
+python -m anicapshelf --db .\anicapshelf.db export annotations --format jsonl
 ```
+
+KonomiTV などの外部ツールから、画像とメタデータを同時保存するローカルAPIを
+起動します。`--capture-output-root` を省略した場合は、設定ファイルの
+`roots.captures` を保存先として使います。
+
+```powershell
+python -m anicapshelf --db .\anicapshelf.db serve-api --host 127.0.0.1 --port 8765
+```
+
+最小APIは `POST /api/captures/annotated` です。`multipart/form-data` で
+`image` と `metadata` JSON文字列を送ると、画像を保存し、
+`capture_annotations` に録画ID、録画パス、再生位置などを残します。
 
 字幕ストリームをサンプル調査します。
 

@@ -75,6 +75,28 @@ CREATE TABLE IF NOT EXISTS capture_recording_matches (
 
 CREATE INDEX IF NOT EXISTS idx_matches_recording_id ON capture_recording_matches(recording_id);
 
+CREATE TABLE IF NOT EXISTS capture_annotations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    capture_id INTEGER NOT NULL,
+    source_app TEXT NOT NULL,
+    external_program_id TEXT,
+    external_video_id TEXT,
+    recording_file_path TEXT,
+    playback_position_seconds REAL,
+    source_url TEXT,
+    tags_json TEXT,
+    note TEXT,
+    metadata_json TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (capture_id) REFERENCES captures(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_capture_annotations_capture_id
+ON capture_annotations(capture_id);
+
+CREATE INDEX IF NOT EXISTS idx_capture_annotations_source
+ON capture_annotations(source_app, external_program_id);
+
 CREATE TABLE IF NOT EXISTS subtitles (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     recording_id INTEGER NOT NULL,
@@ -117,6 +139,8 @@ def init_db(conn: sqlite3.Connection) -> None:
     ensure_column(conn, "recordings", "episode_number", "INTEGER")
     ensure_column(conn, "recordings", "subtitle", "TEXT")
     ensure_column(conn, "capture_recording_matches", "is_best", "INTEGER NOT NULL DEFAULT 0")
+    ensure_column(conn, "capture_annotations", "tags_json", "TEXT")
+    ensure_column(conn, "capture_annotations", "note", "TEXT")
     conn.commit()
 
 
