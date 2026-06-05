@@ -51,6 +51,12 @@ python -m anicapshelf --db .\anicapshelf.db report
 python -m anicapshelf --db .\anicapshelf.db review-unmatched --limit 50
 ```
 
+複数の録画候補に当たっている曖昧なキャプチャを確認します。
+
+```powershell
+python -m anicapshelf --db .\anicapshelf.db review-ambiguous --limit 20 --show-candidates
+```
+
 字幕ストリームをサンプル調査します。
 
 ```powershell

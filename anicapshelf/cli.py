@@ -48,6 +48,9 @@ def cmd_scan_records(args: argparse.Namespace) -> None:
         raise SystemExit("--records-root または設定ファイルの roots.records が必要です")
     root = Path(records_root)
     count = 0
+    created = 0
+    updated = 0
+    skipped = 0
     caption_count = 0
     for path in iter_files(root, RECORDING_EXTS):
         stat = path.stat()
@@ -55,6 +58,16 @@ def cmd_scan_records(args: argparse.Namespace) -> None:
         start_at = parsed.start_at
         end_at = datetime.fromtimestamp(stat.st_mtime)
         duration = (end_at - start_at).total_seconds() if start_at else None
+        end_at_text = iso(end_at)
+        existing = conn.execute(
+            "SELECT size_bytes, end_at FROM recordings WHERE path = ?", (str(path),)
+        ).fetchone()
+        if existing is None:
+            created += 1
+        elif existing["size_bytes"] == stat.st_size and existing["end_at"] == end_at_text:
+            skipped += 1
+        else:
+            updated += 1
         has_caption = None
         if args.probe_subtitles:
             has_caption = 1 if has_arib_caption(path) else 0
@@ -84,7 +97,7 @@ def cmd_scan_records(args: argparse.Namespace) -> None:
                 path.suffix.lower(),
                 stat.st_size,
                 iso(start_at),
-                iso(end_at),
+                end_at_text,
                 duration,
                 parsed.title,
                 parsed.episode_token,
@@ -95,6 +108,9 @@ def cmd_scan_records(args: argparse.Namespace) -> None:
         count += 1
     conn.commit()
     print(f"recordings indexed: {count}")
+    print(f"created: {created}")
+    print(f"updated: {updated}")
+    print(f"skipped: {skipped}")
     if args.probe_subtitles:
         print(f"recordings with arib captions: {caption_count}")
 
@@ -108,9 +124,22 @@ def cmd_scan_captures(args: argparse.Namespace) -> None:
         raise SystemExit("--captures-root または設定ファイルの roots.captures が必要です")
     root = Path(captures_root)
     count = 0
+    created = 0
+    updated = 0
+    skipped = 0
     for path in iter_files(root, IMAGE_EXTS):
         stat = path.stat()
         captured_at = parse_capture_time(path) or datetime.fromtimestamp(stat.st_mtime)
+        modified_at_text = iso(datetime.fromtimestamp(stat.st_mtime))
+        existing = conn.execute(
+            "SELECT size_bytes, modified_at FROM captures WHERE path = ?", (str(path),)
+        ).fetchone()
+        if existing is None:
+            created += 1
+        elif existing["size_bytes"] == stat.st_size and existing["modified_at"] == modified_at_text:
+            skipped += 1
+        else:
+            updated += 1
         width, height = open_image_size(path)
         source_hint = "sharex" if "ShareX" in path.parts else "capture"
         conn.execute(
@@ -136,7 +165,7 @@ def cmd_scan_captures(args: argparse.Namespace) -> None:
                 path.suffix.lower(),
                 stat.st_size,
                 iso(captured_at),
-                iso(datetime.fromtimestamp(stat.st_mtime)),
+                modified_at_text,
                 width,
                 height,
                 source_hint,
@@ -145,6 +174,9 @@ def cmd_scan_captures(args: argparse.Namespace) -> None:
         count += 1
     conn.commit()
     print(f"captures indexed: {count}")
+    print(f"created: {created}")
+    print(f"updated: {updated}")
+    print(f"skipped: {skipped}")
 
 
 def cmd_match(args: argparse.Namespace) -> None:
@@ -324,6 +356,70 @@ def cmd_review_unmatched(args: argparse.Namespace) -> None:
         )
 
 
+def cmd_review_ambiguous(args: argparse.Namespace) -> None:
+    conn = connect(args.db)
+    init_db(conn)
+    rows = conn.execute(
+        """
+        SELECT
+            c.id AS capture_id,
+            c.captured_at,
+            c.filename AS capture_filename,
+            c.source_hint,
+            COUNT(m.recording_id) AS candidate_count
+        FROM captures c
+        JOIN capture_recording_matches m ON m.capture_id = c.id
+        GROUP BY c.id
+        HAVING COUNT(m.recording_id) > 1
+        ORDER BY c.captured_at DESC, c.id DESC
+        LIMIT ?
+        """,
+        (args.limit,),
+    ).fetchall()
+    if not rows:
+        print("曖昧なマッチ候補はありません")
+        return
+    for row in rows:
+        print(
+            "\t".join(
+                [
+                    str(row["capture_id"]),
+                    row["captured_at"] or "",
+                    row["source_hint"] or "",
+                    str(row["candidate_count"]),
+                    row["capture_filename"],
+                ]
+            )
+        )
+        if args.show_candidates:
+            candidates = conn.execute(
+                """
+                SELECT
+                    ROUND(m.source_time_seconds, 1) AS source_time_seconds,
+                    m.confidence,
+                    r.title,
+                    r.path
+                FROM capture_recording_matches m
+                JOIN recordings r ON r.id = m.recording_id
+                WHERE m.capture_id = ?
+                ORDER BY m.confidence DESC, ABS(m.source_time_seconds) ASC
+                """,
+                (row["capture_id"],),
+            ).fetchall()
+            for candidate in candidates:
+                print(
+                    "  - "
+                    + "\t".join(
+                        [
+                            str(candidate["source_time_seconds"]),
+                            str(candidate["confidence"]),
+                            candidate["title"] or "",
+                            candidate["path"],
+                        ]
+                    )
+                )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="anicapshelf")
     parser.add_argument("--db", default="anicapshelf.db", help="SQLite database path")
@@ -371,6 +467,11 @@ def build_parser() -> argparse.ArgumentParser:
     unmatched = sub.add_parser("review-unmatched")
     unmatched.add_argument("--limit", type=int, default=50)
     unmatched.set_defaults(func=cmd_review_unmatched)
+
+    ambiguous = sub.add_parser("review-ambiguous")
+    ambiguous.add_argument("--limit", type=int, default=50)
+    ambiguous.add_argument("--show-candidates", action="store_true")
+    ambiguous.set_defaults(func=cmd_review_ambiguous)
 
     return parser
 
