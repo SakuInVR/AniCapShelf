@@ -1,0 +1,6 @@
+[roots]
+records = "Z:\\TV-Record"
+captures = "Z:\\TV-Capture"
+
+[sharex]
+history_db = "Z:\\TV-Capture\\ShareX\\History.db"

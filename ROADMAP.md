@@ -1,156 +1,146 @@
-# AniCapShelf Roadmap
+# AniCapShelf ロードマップ
 
-AniCapShelf aims to become a local-first anime scene library for recorded TV
-archives and captures. The core promise is simple: every capture should remain
-searchable, taggable, shareable, and traceable back to the source recording and
-timestamp whenever enough evidence exists.
+AniCapShelf は、アニメのキャプチャ画像と録画アーカイブを扱う
+ローカルファーストなシーンライブラリを目指します。中心にある約束は
+シンプルです。キャプチャ画像を、検索できて、タグ付けできて、共有しやすく、
+可能な限り元の録画ファイルと動画内時刻へ戻れる状態で残します。
 
-## Guiding Principles
+## 設計方針
 
-- Keep source traceability first: captures should link back to a recording,
-  episode, and source timestamp whenever possible.
-- Treat metadata as evidence with confidence, not magic truth.
-- Prefer capture-time annotation for new captures; use best-effort recovery for
-  old captures.
-- Keep the project self-hosted and local-first by default.
-- Make manual correction fast, then reuse those corrections to improve future
-  classification.
-- Build toward mobile sharing, but keep the indexing engine independent from
-  any one UI.
+- ソースへの復帰を最優先する。キャプチャは、可能な限り録画、話数、
+  動画内時刻へ紐づける。
+- メタデータは魔法の真実ではなく、確度つきの証拠として扱う。
+- 新しいキャプチャはキャプチャ時点で確定情報を保存する。古いキャプチャは
+  残っている証拠からベストエフォートで復元する。
+- デフォルトはセルフホスト、ローカルファーストにする。
+- 手動修正を速くし、その修正結果を次回以降の分類改善に使う。
+- 最終的にはスマホ共有体験を目指すが、インデックスエンジンは特定UIに
+  依存させない。
 
-## Phase 0: Prototype Evidence
+## Phase 0: プロトタイプ実証
 
-Status: started.
+状態: 着手済み。
 
-- [x] Create Python CLI project structure.
-- [x] Index TS/m2ts recordings into SQLite.
-- [x] Parse Japanese recording filenames into start time, title, episode-like
-      token, and flags.
-- [x] Index JPG/PNG capture files.
-- [x] Match captures to recordings by timestamp window.
-- [x] Import ShareX history metadata.
-- [x] Probe ARIB caption streams with ffprobe.
-- [x] Extract a bounded preview of ARIB subtitles with ffmpeg.
-- [ ] Improve ARIB subtitle cleanup, especially ruby text and styling tags.
-- [ ] Add basic automated tests for parsers and SRT cleanup.
+- [x] Python CLI のプロジェクト構造を作る。
+- [x] TS/m2ts 録画を SQLite にインデックスする。
+- [x] 日本語の録画ファイル名から録画開始時刻、番組名、話数らしき情報、
+      フラグを解析する。
+- [x] JPG/PNG キャプチャ画像をインデックスする。
+- [x] 時刻ウィンドウでキャプチャと録画を突き合わせる。
+- [x] ShareX の履歴メタデータを取り込む。
+- [x] ffprobe で ARIB 字幕ストリームを検出する。
+- [x] ffmpeg で ARIB 字幕の一部を抽出する。
+- [x] ARIB 字幕のクリーニングを改善する。特にルビ文字と装飾タグ。
+- [x] パーサーと字幕クリーニングの基本テストを追加する。
 
-## Phase 1: Reliable Local Index
+## Phase 1: 安定したローカルインデックス
 
-Goal: make the CLI useful for repeated scans on a real recording archive.
+目標: 実際の録画アーカイブに対して、繰り返し安心してスキャンできるCLIにする。
 
-- [ ] Add idempotent scan reports with created/updated/skipped counts.
-- [ ] Add configurable roots through a local config file.
-- [ ] Store recording stream metadata from ffprobe.
-- [ ] Batch-probe `arib_caption` presence with timeout protection.
-- [ ] Improve title normalization for Japanese TV filenames.
-- [ ] Separate series title, episode number, subtitle, and broadcast flags.
-- [ ] Add confidence scoring for capture-to-recording matches.
-- [ ] Store multiple match candidates while marking one as the current best.
-- [ ] Add commands to list unmatched captures and ambiguous matches.
-- [ ] Add export commands for JSON/CSV debugging.
+- [ ] 作成/更新/スキップ件数がわかる冪等なスキャンレポートを追加する。
+- [x] ローカル設定ファイルで録画ルートやキャプチャルートを指定できるようにする。
+- [ ] ffprobe の録画ストリームメタデータを保存する。
+- [ ] タイムアウト保護つきで `arib_caption` の有無を一括調査する。
+- [ ] 日本語TV録画ファイル名のタイトル正規化を改善する。
+- [ ] シリーズ名、話数、サブタイトル、放送フラグを分離する。
+- [ ] キャプチャと録画の突き合わせに確度スコアを追加する。
+- [ ] 複数候補を保存しつつ、現在の最有力候補を示せるようにする。
+- [ ] 未分類キャプチャと曖昧なマッチ候補を一覧するコマンドを追加する。
+- [ ] デバッグ用に JSON/CSV エクスポートを追加する。
 
-## Phase 2: Subtitle and Search Index
+## Phase 2: 字幕と検索インデックス
 
-Goal: make scenes searchable by dialogue and screen text.
+目標: セリフや画面内文字でシーンを検索できるようにする。
 
-- [ ] Build robust ARIB subtitle extraction workers.
-- [ ] Normalize subtitle text while preserving raw text for debugging.
-- [ ] Store subtitle cues as time-series rows per recording.
-- [ ] Link matched captures to nearby subtitle cues.
-- [ ] Add SQLite FTS search over titles, subtitles, tags, and notes.
-- [ ] Add OCR pipeline for image text.
-- [ ] Store OCR results separately from TS subtitles.
-- [ ] Add search commands such as `search-text`, `search-title`, and
-      `near-capture`.
+- [ ] 安定した ARIB 字幕抽出ワーカーを作る。
+- [ ] 生テキストをデバッグ用に残しつつ、検索用テキストを正規化する。
+- [ ] 字幕キューを録画ごとの時系列データとして保存する。
+- [ ] 紐づいたキャプチャへ前後の字幕キューを関連付ける。
+- [ ] タイトル、字幕、タグ、メモに対する SQLite FTS 検索を追加する。
+- [ ] 画像内文字を読む OCR パイプラインを追加する。
+- [ ] OCR 結果は TS 字幕とは別の情報源として保存する。
+- [ ] `search-text`、`search-title`、`near-capture` のような検索コマンドを
+      追加する。
 
-## Phase 3: Capture-Time Annotation
+## Phase 3: キャプチャ同時アノテート
 
-Goal: stop relying on after-the-fact guessing for new captures.
+目標: 新しいキャプチャでは、あとから推測しなくても元ソースへ戻れるようにする。
 
-- [ ] Research KonomiTV integration points for current program and playback
-      position.
-- [ ] Design an annotation API endpoint:
-      `POST /captures` with image, recording id/path, playback timestamp, and
-      initial tags.
-- [ ] Add a small local capture helper that saves the image and metadata
-      together.
-- [ ] Support quick tags at capture time.
-- [ ] Attach nearby subtitles automatically at capture time.
-- [ ] Add "open source scene" metadata that can jump back to the source video
-      and timestamp in a local player or KonomiTV route.
-- [ ] Preserve fallback import behavior for older screenshots.
+- [ ] KonomiTV から現在の番組と再生位置を取る連携方法を調査する。
+- [ ] `POST /captures` のようなアノテーションAPIを設計する。画像、録画IDまたは
+      録画パス、再生位置、初期タグを受け取る。
+- [ ] 画像とメタデータを同時保存する小さなローカルキャプチャ補助ツールを作る。
+- [ ] キャプチャ時にクイックタグを付けられるようにする。
+- [ ] キャプチャ時点で前後の字幕を自動添付する。
+- [ ] ローカルプレイヤーや KonomiTV の該当位置に戻るための
+      「元シーンを開く」メタデータを保存する。
+- [ ] 古いスクリーンショット向けの後追いインポートも維持する。
 
-## Phase 4: Web API and Local UI
+## Phase 4: Web API とローカルUI
 
-Goal: browse, correct, and search the archive from a browser.
+目標: ブラウザからアーカイブを閲覧、修正、検索できるようにする。
 
-- [ ] Choose the initial API stack.
-- [ ] Add endpoints for recordings, captures, matches, subtitles, tags, and
-      collections.
-- [ ] Build a responsive capture grid.
-- [ ] Build capture detail pages with source recording, timestamp, nearby
-      subtitles, tags, and ShareX history.
-- [ ] Add manual correction UI for series, episode, and source timestamp.
-- [ ] Add tag management and saved collections.
-- [ ] Add mobile-friendly share actions.
-- [ ] Add "unmatched" and "needs review" workflows.
+- [ ] 最初のAPIスタックを決める。
+- [ ] 録画、キャプチャ、マッチ、字幕、タグ、コレクションのAPIを追加する。
+- [ ] レスポンシブなキャプチャグリッドを作る。
+- [ ] キャプチャ詳細ページを作る。元録画、動画内時刻、前後字幕、タグ、
+      ShareX 履歴を表示する。
+- [ ] シリーズ、話数、元動画内時刻を手動修正できるUIを追加する。
+- [ ] タグ管理と保存済みコレクションを追加する。
+- [ ] スマホから使いやすい共有アクションを追加する。
+- [ ] 「未分類」「要確認」の整理フローを追加する。
 
-## Phase 5: Anime-Focused Organization
+## Phase 5: アニメ特化の整理体験
 
-Goal: make the library feel designed for anime archives, not generic photos.
+目標: 汎用写真管理ではなく、アニメアーカイブ向けに気持ちよく使える形にする。
 
-- [ ] Add series pages.
-- [ ] Add episode pages with timeline captures.
-- [ ] Add collections such as eyecatches, OP/ED cuts, key scenes, and SNS picks.
-- [ ] Add duplicate and near-duplicate detection.
-- [ ] Add visual similarity search with image embeddings.
-- [ ] Add optional character or visual tag suggestions.
-- [ ] Support user-defined tag vocabularies.
-- [ ] Add bulk tagging and bulk correction flows.
+- [ ] 作品ページを追加する。
+- [ ] 話数ページとキャプチャタイムラインを追加する。
+- [ ] アイキャッチ、OP/EDカット、名シーン、SNS候補などのコレクションを追加する。
+- [ ] 重複画像と近似画像の検出を追加する。
+- [ ] 画像特徴量による類似シーン検索を追加する。
+- [ ] 任意でキャラや視覚タグの候補提示を追加する。
+- [ ] ユーザー定義のタグ語彙をサポートする。
+- [ ] 一括タグ付けと一括修正フローを追加する。
 
-## Phase 6: Mobile and Sharing Experience
+## Phase 6: スマホと共有体験
 
-Goal: make capture discovery and sharing feel native on a phone.
+目標: スマホで探して共有する流れをネイティブ感覚に近づける。
 
-- [ ] Harden the web UI as a PWA.
-- [ ] Add phone-first search and filter interactions.
-- [ ] Add share-sheet friendly image export.
-- [ ] Add presets for SNS-ready crops or variants.
-- [ ] Add saved smart albums.
-- [ ] Evaluate whether a native app is worth building after the PWA workflow is
-      proven.
+- [ ] Web UI を PWA として堅くする。
+- [ ] スマホ優先の検索・フィルタ操作を追加する。
+- [ ] 共有シートと相性のよい画像エクスポートを追加する。
+- [ ] SNS向けのクロップや派生画像プリセットを追加する。
+- [ ] スマートアルバムを追加する。
+- [ ] PWAの使い勝手を確認したうえで、ネイティブアプリ化の価値を評価する。
 
-## Phase 7: Packaging and Operations
+## Phase 7: パッケージングと運用
 
-Goal: make AniCapShelf easy to run on the Linux recording PC.
+目標: Linux の録画PC上で運用しやすくする。
 
-- [ ] Add Docker/Compose packaging.
-- [ ] Add systemd service examples.
-- [ ] Add scheduled scan workers.
-- [ ] Add background job status and retry handling.
-- [ ] Add backup/restore guidance for the SQLite or future database.
-- [ ] Add safe handling for missing, moved, or renamed source files.
-- [ ] Add privacy and local-network deployment notes.
+- [ ] Docker/Compose パッケージを追加する。
+- [ ] systemd サービス例を追加する。
+- [ ] 定期スキャンワーカーを追加する。
+- [ ] バックグラウンドジョブの状態表示とリトライを追加する。
+- [ ] SQLite または将来のDBのバックアップ/復元ガイドを追加する。
+- [ ] 元ファイルが消えた、移動した、リネームされた場合の安全な扱いを追加する。
+- [ ] プライバシーとローカルネットワーク公開の注意点を文書化する。
 
-## Open Design Questions
+## 未決定の設計課題
 
-- What is the cleanest KonomiTV integration point for current playback state?
-- Should the first web stack be a single Python app, or should API and frontend
-  be split early?
-- How much should AniCapShelf modify the existing folder layout versus indexing
-  paths in place?
-- How should subtitle ruby text be represented: stripped, preserved, or stored
-  as separate reading metadata?
-- What is the best source-jump format for returning from a capture to the
-  original recording?
-- Which tags should be first-class built-ins, and which should remain fully
-  user-defined?
+- KonomiTV の現在の再生状態を取得する最もきれいな連携点はどこか。
+- 最初のWeb構成は単一の Python アプリでよいか、APIとフロントエンドを早めに
+  分けるべきか。
+- AniCapShelf は既存フォルダ構造をどこまで変更してよいか。それとも基本は
+  既存パスをインデックスするだけにするか。
+- 字幕のルビは削除するか、保持するか、読み情報として別保存するか。
+- キャプチャから元録画へ戻るためのURL/コマンド形式は何がよいか。
+- どのタグを組み込みタグとして扱い、どこから完全なユーザー定義にするか。
 
-## Near-Term Next Steps
+## 直近の次ステップ
 
-1. Add parser and subtitle-cleanup tests.
-2. Improve subtitle text normalization.
-3. Add a `review-unmatched` command for old captures.
-4. Add config-file support for archive roots.
-5. Decide the first KonomiTV capture-time annotation experiment.
-
+1. 古いキャプチャ向けに `review-unmatched` コマンドを追加する。
+2. 作成/更新/スキップ件数がわかるスキャンレポートを追加する。
+3. タイムアウト保護つきで `arib_caption` の有無を一括調査する。
+4. KonomiTV のキャプチャ同時アノテート実験の最初の形を決める。
+5. Web API の最小構成を決める。

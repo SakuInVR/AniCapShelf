@@ -1,55 +1,98 @@
 # AniCapShelf
 
-AniCapShelf is a local-first media index for anime captures and recorded TV
-archives. It links screenshots back to their source recording, episode,
-timestamp, captions, and user tags so a capture can become a searchable scene
-card instead of an orphaned image file.
+AniCapShelf は、アニメのキャプチャ画像と録画アーカイブをつなぐ
+ローカルファーストなシーン管理ツールです。キャプチャ画像を単なる
+JPEG/PNGとして放置せず、元の録画ファイル、作品、話数、動画内時刻、
+字幕、ユーザータグと結びつけて、あとから検索・整理・共有しやすい
+「シーンカード」として扱うことを目指しています。
 
-This repository starts with a small Python prototype:
+現在は小さな Python プロトタイプから始めています。
 
-- index TS/m2ts recordings from a folder such as `Z:\TV-Record`
-- parse Japanese recording filenames into date, title, episode-like tokens, and flags
-- index capture images from a folder such as `Z:\TV-Capture`
-- match captures to recordings by timestamp where possible
-- probe TS subtitle streams such as `arib_caption`
-- optionally extract subtitle text for a single recording with ffmpeg
+- `Z:\TV-Record` のようなフォルダから TS/m2ts 録画をインデックスする
+- 日本語の録画ファイル名から録画開始時刻、番組名、話数らしき情報、
+  `[字]` などのフラグを取り出す
+- `Z:\TV-Capture` のようなフォルダからキャプチャ画像をインデックスする
+- 画像の撮影時刻と録画時間帯を使って、可能な範囲で元録画に紐づける
+- `arib_caption` などの TS 字幕ストリームを検出する
+- ffmpeg で録画から字幕テキストの一部を抽出する
+- ShareX の履歴DBを取り込む
 
-## Quick Start
+## クイックスタート
 
-```powershell
-python -m anicapshelf scan-records --db .\anicapshelf.db --records-root Z:\TV-Record
-python -m anicapshelf scan-captures --db .\anicapshelf.db --captures-root Z:\TV-Capture
-python -m anicapshelf match --db .\anicapshelf.db
-python -m anicapshelf report --db .\anicapshelf.db
-```
-
-Probe subtitle streams on a sample:
+まずローカル設定ファイルを作ります。
 
 ```powershell
-python -m anicapshelf probe-subtitles --records-root Z:\TV-Record --limit 40
+Copy-Item .\anicapshelf.example.toml .\anicapshelf.toml
 ```
 
-Extract subtitles from one recording:
+`anicapshelf.toml` のパスを自分の環境に合わせて編集します。
+
+```toml
+[roots]
+records = "Z:\\TV-Record"
+captures = "Z:\\TV-Capture"
+
+[sharex]
+history_db = "Z:\\TV-Capture\\ShareX\\History.db"
+```
+
+設定ファイルを使う場合は、ルートパスの指定を省略できます。
 
 ```powershell
-python -m anicapshelf extract-subtitles --db .\anicapshelf.db --recording-id 1 --seconds 120 --max-cues 50
+python -m anicapshelf --db .\anicapshelf.db scan-records
+python -m anicapshelf --db .\anicapshelf.db scan-captures
+python -m anicapshelf --db .\anicapshelf.db match
+python -m anicapshelf --db .\anicapshelf.db report
 ```
 
-## Current Design
+字幕ストリームをサンプル調査します。
 
-AniCapShelf treats source metadata as layered evidence:
+```powershell
+python -m anicapshelf --db .\anicapshelf.db probe-subtitles --limit 40
+```
 
-1. Recording filename metadata: start time, title, episode-like token, flags.
-2. Capture filename or filesystem time.
-3. Time-window matching between captures and recordings.
-4. TS caption streams, usually ARIB captions in Japanese TV recordings.
-5. OCR, image embeddings, and manual tags in later stages.
+録画1本から字幕の一部を抽出します。
 
-Older captures can only be reconstructed when enough evidence remains. New
-captures should eventually be saved through an annotation path that records the
-KonomiTV source recording and playback position at capture time.
+```powershell
+python -m anicapshelf --db .\anicapshelf.db extract-subtitles --recording-id 1 --seconds 120 --max-cues 50
+```
 
-## Roadmap
+ShareX の履歴を取り込みます。
 
-See [ROADMAP.md](ROADMAP.md) for the staged plan from the current indexing
-prototype to capture-time annotation, searchable scene cards, and mobile sharing.
+```powershell
+python -m anicapshelf --db .\anicapshelf.db import-sharex
+```
+
+コマンドラインから直接ルートを指定することもできます。
+
+```powershell
+python -m anicapshelf --db .\anicapshelf.db scan-records --records-root Z:\TV-Record
+python -m anicapshelf --db .\anicapshelf.db scan-captures --captures-root Z:\TV-Capture
+```
+
+## テスト
+
+```powershell
+python -m pip install -e ".[dev]"
+python -m pytest
+```
+
+## 現在の設計
+
+AniCapShelf は、複数の情報源を「確度つきの証拠」として扱います。
+
+1. 録画ファイル名から取れる録画開始時刻、番組名、話数、フラグ
+2. キャプチャファイル名またはファイル更新時刻
+3. キャプチャ時刻と録画時間帯の突き合わせ
+4. 日本の録画TSに含まれることがある ARIB 字幕
+5. 今後追加する OCR、画像特徴量、手動タグ
+
+過去のキャプチャは、残っている証拠から可能な範囲で復元します。新しい
+キャプチャについては、将来的に KonomiTV の視聴状態や再生位置を
+キャプチャ時点で同時保存する「キャプチャ同時アノテート」を本命にします。
+
+## ロードマップ
+
+段階的な開発計画は [ROADMAP.md](ROADMAP.md) を参照してください。現在の
+インデックス用プロトタイプから、キャプチャ同時アノテート、検索可能な
+シーンカード、スマホでの共有体験までを順番に進めます。

@@ -6,6 +6,7 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 
+from .config import load_config
 from .db import connect, init_db
 from .media import extract_srt, extract_srt_preview, has_arib_caption, parse_srt
 from .parsers import parse_capture_time, parse_recording_name
@@ -41,7 +42,11 @@ def open_image_size(path: Path) -> tuple[int | None, int | None]:
 def cmd_scan_records(args: argparse.Namespace) -> None:
     conn = connect(args.db)
     init_db(conn)
-    root = Path(args.records_root)
+    config = load_config(args.config)
+    records_root = args.records_root or config.records_root
+    if not records_root:
+        raise SystemExit("--records-root または設定ファイルの roots.records が必要です")
+    root = Path(records_root)
     count = 0
     caption_count = 0
     for path in iter_files(root, RECORDING_EXTS):
@@ -97,7 +102,11 @@ def cmd_scan_records(args: argparse.Namespace) -> None:
 def cmd_scan_captures(args: argparse.Namespace) -> None:
     conn = connect(args.db)
     init_db(conn)
-    root = Path(args.captures_root)
+    config = load_config(args.config)
+    captures_root = args.captures_root or config.captures_root
+    if not captures_root:
+        raise SystemExit("--captures-root または設定ファイルの roots.captures が必要です")
+    root = Path(captures_root)
     count = 0
     for path in iter_files(root, IMAGE_EXTS):
         stat = path.stat()
@@ -181,7 +190,11 @@ def cmd_match(args: argparse.Namespace) -> None:
 
 
 def cmd_probe_subtitles(args: argparse.Namespace) -> None:
-    root = Path(args.records_root)
+    config = load_config(args.config)
+    records_root = args.records_root or config.records_root
+    if not records_root:
+        raise SystemExit("--records-root または設定ファイルの roots.records が必要です")
+    root = Path(records_root)
     files = list(iter_files(root, RECORDING_EXTS))[: args.limit]
     count = 0
     for path in files:
@@ -229,7 +242,11 @@ def cmd_extract_subtitles(args: argparse.Namespace) -> None:
 
 
 def cmd_import_sharex(args: argparse.Namespace) -> None:
-    src = sqlite3.connect(args.history_db)
+    config = load_config(args.config)
+    history_db = args.history_db or config.sharex_history_db
+    if not history_db:
+        raise SystemExit("--history-db または設定ファイルの sharex.history_db が必要です")
+    src = sqlite3.connect(history_db)
     src.row_factory = sqlite3.Row
     dst = connect(args.db)
     init_db(dst)
@@ -279,15 +296,20 @@ def cmd_report(args: argparse.Namespace) -> None:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="anicapshelf")
     parser.add_argument("--db", default="anicapshelf.db", help="SQLite database path")
+    parser.add_argument(
+        "--config",
+        default="anicapshelf.toml",
+        help="ローカル設定ファイルのパス",
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
     records = sub.add_parser("scan-records")
-    records.add_argument("--records-root", required=True)
+    records.add_argument("--records-root")
     records.add_argument("--probe-subtitles", action="store_true")
     records.set_defaults(func=cmd_scan_records)
 
     captures = sub.add_parser("scan-captures")
-    captures.add_argument("--captures-root", required=True)
+    captures.add_argument("--captures-root")
     captures.set_defaults(func=cmd_scan_captures)
 
     match = sub.add_parser("match")
@@ -295,7 +317,7 @@ def build_parser() -> argparse.ArgumentParser:
     match.set_defaults(func=cmd_match)
 
     probe = sub.add_parser("probe-subtitles")
-    probe.add_argument("--records-root", required=True)
+    probe.add_argument("--records-root")
     probe.add_argument("--limit", type=int, default=40)
     probe.add_argument("--verbose", action="store_true")
     probe.set_defaults(func=cmd_probe_subtitles)
@@ -309,7 +331,7 @@ def build_parser() -> argparse.ArgumentParser:
     extract.set_defaults(func=cmd_extract_subtitles)
 
     sharex = sub.add_parser("import-sharex")
-    sharex.add_argument("--history-db", required=True)
+    sharex.add_argument("--history-db")
     sharex.set_defaults(func=cmd_import_sharex)
 
     report = sub.add_parser("report")

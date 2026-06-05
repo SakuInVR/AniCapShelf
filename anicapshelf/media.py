@@ -132,6 +132,10 @@ SRT_BLOCK_RE = re.compile(
 )
 
 TAG_RE = re.compile(r"<[^>]+>|\{\\[^}]+\}")
+RUBY_FONT_RE = re.compile(
+    r'<font\s+size="18">\s*(?:<font\s+color="[^"]+">)?[^<]*(?:</font>)?\s*</font>',
+    re.IGNORECASE,
+)
 
 
 def parse_srt_seconds(value: str) -> float:
@@ -141,7 +145,8 @@ def parse_srt_seconds(value: str) -> float:
 
 
 def clean_caption_text(raw: str) -> str:
-    text = TAG_RE.sub("", raw)
+    text = RUBY_FONT_RE.sub("", raw)
+    text = TAG_RE.sub("", text)
     text = unescape(text)
     text = text.replace("➡", "")
     lines = [line.strip() for line in text.splitlines()]
