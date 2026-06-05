@@ -293,6 +293,37 @@ def cmd_report(args: argparse.Namespace) -> None:
         print(f"{label}: {conn.execute(query).fetchone()[0]}")
 
 
+def cmd_review_unmatched(args: argparse.Namespace) -> None:
+    conn = connect(args.db)
+    init_db(conn)
+    rows = conn.execute(
+        """
+        SELECT c.id, c.captured_at, c.filename, c.source_hint, c.path
+        FROM captures c
+        LEFT JOIN capture_recording_matches m ON m.capture_id = c.id
+        WHERE m.capture_id IS NULL
+        ORDER BY c.captured_at DESC, c.id DESC
+        LIMIT ?
+        """,
+        (args.limit,),
+    ).fetchall()
+    if not rows:
+        print("未分類キャプチャはありません")
+        return
+    for row in rows:
+        print(
+            "\t".join(
+                [
+                    str(row["id"]),
+                    row["captured_at"] or "",
+                    row["source_hint"] or "",
+                    row["filename"],
+                    row["path"],
+                ]
+            )
+        )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="anicapshelf")
     parser.add_argument("--db", default="anicapshelf.db", help="SQLite database path")
@@ -336,6 +367,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     report = sub.add_parser("report")
     report.set_defaults(func=cmd_report)
+
+    unmatched = sub.add_parser("review-unmatched")
+    unmatched.add_argument("--limit", type=int, default=50)
+    unmatched.set_defaults(func=cmd_review_unmatched)
 
     return parser
 

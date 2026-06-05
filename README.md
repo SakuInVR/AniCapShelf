@@ -45,6 +45,12 @@ python -m anicapshelf --db .\anicapshelf.db match
 python -m anicapshelf --db .\anicapshelf.db report
 ```
 
+未分類キャプチャを確認します。
+
+```powershell
+python -m anicapshelf --db .\anicapshelf.db review-unmatched --limit 50
+```
+
 字幕ストリームをサンプル調査します。
 
 ```powershell
