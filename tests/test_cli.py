@@ -42,6 +42,48 @@ def test_scan_captures_reports_created_and_skipped(tmp_path: Path, capsys):
     assert "skipped: 1" in second
 
 
+def test_scan_records_preserves_existing_caption_probe(tmp_path: Path, capsys):
+    records_root = tmp_path / "records"
+    records_root.mkdir()
+    recording = records_root / "2026年01月10日02時00分00秒-作品　第１話.m2ts"
+    recording.write_bytes(b"recording")
+    db_path = tmp_path / "test.db"
+
+    main(
+        [
+            "--db",
+            str(db_path),
+            "scan-records",
+            "--records-root",
+            str(records_root),
+        ]
+    )
+    capsys.readouterr()
+
+    import sqlite3
+
+    con = sqlite3.connect(db_path)
+    con.execute("UPDATE recordings SET has_arib_caption = 1")
+    con.commit()
+    con.close()
+
+    main(
+        [
+            "--db",
+            str(db_path),
+            "scan-records",
+            "--records-root",
+            str(records_root),
+        ]
+    )
+    capsys.readouterr()
+
+    con = sqlite3.connect(db_path)
+    value = con.execute("SELECT has_arib_caption FROM recordings").fetchone()[0]
+    con.close()
+    assert value == 1
+
+
 def test_review_unmatched_outputs_indexed_capture(tmp_path: Path, capsys):
     captures_root = tmp_path / "captures"
     captures_root.mkdir()

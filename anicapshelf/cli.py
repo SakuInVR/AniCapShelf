@@ -69,7 +69,8 @@ def cmd_scan_records(args: argparse.Namespace) -> None:
         duration = (end_at - start_at).total_seconds() if start_at else None
         end_at_text = iso(end_at)
         existing = conn.execute(
-            "SELECT size_bytes, end_at FROM recordings WHERE path = ?", (str(path),)
+            "SELECT size_bytes, end_at, has_arib_caption FROM recordings WHERE path = ?",
+            (str(path),),
         ).fetchone()
         if existing is None:
             created += 1
@@ -77,7 +78,7 @@ def cmd_scan_records(args: argparse.Namespace) -> None:
             skipped += 1
         else:
             updated += 1
-        has_caption = None
+        has_caption = existing["has_arib_caption"] if existing is not None else None
         if args.probe_subtitles:
             has_caption = 1 if has_arib_caption(path, args.probe_timeout) else 0
             caption_count += int(bool(has_caption))
@@ -85,8 +86,9 @@ def cmd_scan_records(args: argparse.Namespace) -> None:
             """
             INSERT INTO recordings (
                 path, filename, extension, size_bytes, start_at, end_at,
-                duration_seconds, title, episode_token, flags, has_arib_caption
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                duration_seconds, title, normalized_title, series_title,
+                episode_token, episode_number, subtitle, flags, has_arib_caption
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(path) DO UPDATE SET
                 filename=excluded.filename,
                 extension=excluded.extension,
@@ -95,7 +97,11 @@ def cmd_scan_records(args: argparse.Namespace) -> None:
                 end_at=excluded.end_at,
                 duration_seconds=excluded.duration_seconds,
                 title=excluded.title,
+                normalized_title=excluded.normalized_title,
+                series_title=excluded.series_title,
                 episode_token=excluded.episode_token,
+                episode_number=excluded.episode_number,
+                subtitle=excluded.subtitle,
                 flags=excluded.flags,
                 has_arib_caption=excluded.has_arib_caption,
                 scanned_at=CURRENT_TIMESTAMP
@@ -109,7 +115,11 @@ def cmd_scan_records(args: argparse.Namespace) -> None:
                 end_at_text,
                 duration,
                 parsed.title,
+                parsed.normalized_title,
+                parsed.series_title,
                 parsed.episode_token,
+                parsed.episode_number,
+                parsed.subtitle,
                 parsed.flags,
                 has_caption,
             ),
@@ -415,6 +425,7 @@ def cmd_report(args: argparse.Namespace) -> None:
     queries = {
         "recordings": "SELECT COUNT(*) FROM recordings",
         "recordings_with_title": "SELECT COUNT(*) FROM recordings WHERE title IS NOT NULL",
+        "recordings_with_series": "SELECT COUNT(*) FROM recordings WHERE series_title IS NOT NULL",
         "recordings_with_episode": "SELECT COUNT(*) FROM recordings WHERE episode_token IS NOT NULL",
         "recordings_with_arib_caption": "SELECT COUNT(*) FROM recordings WHERE has_arib_caption = 1",
         "recording_streams": "SELECT COUNT(*) FROM recording_streams",

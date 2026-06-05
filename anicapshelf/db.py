@@ -17,7 +17,11 @@ CREATE TABLE IF NOT EXISTS recordings (
     end_at TEXT,
     duration_seconds REAL,
     title TEXT,
+    normalized_title TEXT,
+    series_title TEXT,
     episode_token TEXT,
+    episode_number INTEGER,
+    subtitle TEXT,
     flags TEXT,
     has_arib_caption INTEGER,
     scanned_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -107,4 +111,16 @@ def connect(db_path: str | Path) -> sqlite3.Connection:
 
 def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
+    ensure_column(conn, "recordings", "normalized_title", "TEXT")
+    ensure_column(conn, "recordings", "series_title", "TEXT")
+    ensure_column(conn, "recordings", "episode_number", "INTEGER")
+    ensure_column(conn, "recordings", "subtitle", "TEXT")
     conn.commit()
+
+
+def ensure_column(
+    conn: sqlite3.Connection, table_name: str, column_name: str, column_type: str
+) -> None:
+    columns = {row["name"] for row in conn.execute(f"PRAGMA table_info({table_name})")}
+    if column_name not in columns:
+        conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}")
