@@ -48,3 +48,8 @@ AniCapShelf treats source metadata as layered evidence:
 Older captures can only be reconstructed when enough evidence remains. New
 captures should eventually be saved through an annotation path that records the
 KonomiTV source recording and playback position at capture time.
+
+## Roadmap
+
+See [ROADMAP.md](ROADMAP.md) for the staged plan from the current indexing
+prototype to capture-time annotation, searchable scene cards, and mobile sharing.
