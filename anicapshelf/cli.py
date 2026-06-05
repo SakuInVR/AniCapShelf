@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import csv
+import json
 import os
 import sqlite3
 from datetime import datetime
@@ -521,6 +523,59 @@ def cmd_review_ambiguous(args: argparse.Namespace) -> None:
                 )
 
 
+EXPORT_QUERIES = {
+    "recordings": "SELECT * FROM recordings ORDER BY id",
+    "captures": "SELECT * FROM captures ORDER BY id",
+    "matches": """
+        SELECT
+            m.capture_id,
+            c.path AS capture_path,
+            c.captured_at,
+            m.recording_id,
+            r.path AS recording_path,
+            r.title,
+            m.source_time_seconds,
+            m.confidence,
+            m.method
+        FROM capture_recording_matches m
+        JOIN captures c ON c.id = m.capture_id
+        JOIN recordings r ON r.id = m.recording_id
+        ORDER BY m.capture_id, m.confidence DESC, m.recording_id
+    """,
+    "streams": "SELECT * FROM recording_streams ORDER BY recording_id, stream_index",
+    "subtitles": "SELECT * FROM subtitles ORDER BY recording_id, start_seconds",
+    "sharex": "SELECT * FROM sharex_history ORDER BY id",
+}
+
+
+def cmd_export(args: argparse.Namespace) -> None:
+    conn = connect(args.db)
+    init_db(conn)
+    query = EXPORT_QUERIES[args.dataset]
+    rows = [dict(row) for row in conn.execute(query).fetchall()]
+    output_path = Path(args.output) if args.output else None
+    if args.format == "jsonl":
+        lines = [json.dumps(row, ensure_ascii=False, sort_keys=True) for row in rows]
+        content = "\n".join(lines)
+        if content:
+            content += "\n"
+    else:
+        fieldnames = list(rows[0].keys()) if rows else []
+        from io import StringIO
+
+        buffer = StringIO()
+        writer = csv.DictWriter(buffer, fieldnames=fieldnames, lineterminator="\n")
+        if fieldnames:
+            writer.writeheader()
+            writer.writerows(rows)
+        content = buffer.getvalue()
+    if output_path:
+        output_path.write_text(content, encoding="utf-8", newline="")
+        print(f"exported {len(rows)} rows: {output_path}")
+    else:
+        print(content, end="")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="anicapshelf")
     parser.add_argument("--db", default="anicapshelf.db", help="SQLite database path")
@@ -590,6 +645,16 @@ def build_parser() -> argparse.ArgumentParser:
     ambiguous.add_argument("--limit", type=int, default=50)
     ambiguous.add_argument("--show-candidates", action="store_true")
     ambiguous.set_defaults(func=cmd_review_ambiguous)
+
+    export = sub.add_parser("export")
+    export.add_argument(
+        "dataset",
+        choices=sorted(EXPORT_QUERIES),
+        help="出力するデータセット",
+    )
+    export.add_argument("--format", choices=["jsonl", "csv"], default="jsonl")
+    export.add_argument("--output")
+    export.set_defaults(func=cmd_export)
 
     return parser
 

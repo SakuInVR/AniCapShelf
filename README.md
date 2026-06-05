@@ -57,6 +57,13 @@ python -m anicapshelf --db .\anicapshelf.db review-unmatched --limit 50
 python -m anicapshelf --db .\anicapshelf.db review-ambiguous --limit 20 --show-candidates
 ```
 
+デバッグ用にDB内容を JSONL または CSV で出力します。
+
+```powershell
+python -m anicapshelf --db .\anicapshelf.db export matches --format jsonl --output .\matches.jsonl
+python -m anicapshelf --db .\anicapshelf.db export captures --format csv --output .\captures.csv
+```
+
 字幕ストリームをサンプル調査します。
 
 ```powershell
