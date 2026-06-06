@@ -65,6 +65,7 @@ CREATE TABLE IF NOT EXISTS capture_recording_matches (
     recording_id INTEGER NOT NULL,
     source_time_seconds REAL,
     confidence REAL NOT NULL,
+    confidence_reason TEXT,
     is_best INTEGER NOT NULL DEFAULT 0,
     method TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -153,6 +154,7 @@ def init_db(conn: sqlite3.Connection) -> None:
     ensure_column(conn, "recordings", "episode_number", "INTEGER")
     ensure_column(conn, "recordings", "subtitle", "TEXT")
     ensure_column(conn, "capture_recording_matches", "is_best", "INTEGER NOT NULL DEFAULT 0")
+    ensure_column(conn, "capture_recording_matches", "confidence_reason", "TEXT")
     ensure_column(conn, "capture_annotations", "tags_json", "TEXT")
     ensure_column(conn, "capture_annotations", "note", "TEXT")
     conn.commit()

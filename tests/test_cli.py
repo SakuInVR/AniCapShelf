@@ -193,7 +193,7 @@ def test_match_marks_one_best_candidate(tmp_path: Path, capsys):
     con = sqlite3.connect(db_path)
     rows = con.execute(
         """
-        SELECT r.title, m.is_best
+        SELECT r.title, m.is_best, m.confidence, m.confidence_reason
         FROM capture_recording_matches m
         JOIN recordings r ON r.id = m.recording_id
         ORDER BY m.is_best DESC, r.title
@@ -202,4 +202,54 @@ def test_match_marks_one_best_candidate(tmp_path: Path, capsys):
     con.close()
 
     assert len(rows) == 2
-    assert rows[0] == ("本命番組　第１話", 1)
+    assert rows[0][0] == "本命番組　第１話"
+    assert rows[0][1] == 1
+    assert rows[0][2] > rows[1][2]
+    assert "inside_recording" in rows[0][3]
+    assert "multi_candidate_penalty=2" in rows[0][3]
+
+
+def test_match_scores_outside_window_lower_than_inside(tmp_path: Path, capsys):
+    records_root = tmp_path / "records"
+    captures_root = tmp_path / "captures"
+    records_root.mkdir()
+    captures_root.mkdir()
+    recording = records_root / "2026年01月10日02時00分00秒-本命番組　第１話.m2ts"
+    capture_inside = captures_root / "Capture_20260110-020500.jpg"
+    capture_before = captures_root / "Capture_20260110-015959.jpg"
+    recording.write_bytes(b"recording")
+    capture_inside.write_bytes(b"capture")
+    capture_before.write_bytes(b"capture")
+
+    import os
+    import sqlite3
+
+    recording_mtime = datetime(2026, 1, 10, 2, 30, 0).timestamp()
+    inside_mtime = datetime(2026, 1, 10, 2, 5, 0).timestamp()
+    before_mtime = datetime(2026, 1, 10, 1, 59, 59).timestamp()
+    os.utime(recording, (recording_mtime, recording_mtime))
+    os.utime(capture_inside, (inside_mtime, inside_mtime))
+    os.utime(capture_before, (before_mtime, before_mtime))
+
+    db_path = tmp_path / "test.db"
+    main(["--db", str(db_path), "scan-records", "--records-root", str(records_root)])
+    main(["--db", str(db_path), "scan-captures", "--captures-root", str(captures_root)])
+    main(["--db", str(db_path), "match", "--window-minutes", "2"])
+    capsys.readouterr()
+
+    con = sqlite3.connect(db_path)
+    rows = con.execute(
+        """
+        SELECT c.filename, m.confidence, m.confidence_reason
+        FROM capture_recording_matches m
+        JOIN captures c ON c.id = m.capture_id
+        ORDER BY c.filename
+        """
+    ).fetchall()
+    con.close()
+
+    before = next(row for row in rows if row[0] == "Capture_20260110-015959.jpg")
+    inside = next(row for row in rows if row[0] == "Capture_20260110-020500.jpg")
+    assert inside[1] > before[1]
+    assert "inside_recording" in inside[2]
+    assert "before_start" in before[2]

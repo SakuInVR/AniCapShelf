@@ -128,6 +128,7 @@ def cmd_scan_records(args: argparse.Namespace) -> None:
         )
         count += 1
     conn.commit()
+    conn.close()
     print(f"recordings indexed: {count}")
     print(f"created: {created}")
     print(f"updated: {updated}")
@@ -194,6 +195,7 @@ def cmd_scan_captures(args: argparse.Namespace) -> None:
         )
         count += 1
     conn.commit()
+    conn.close()
     print(f"captures indexed: {count}")
     print(f"created: {created}")
     print(f"updated: {updated}")
@@ -208,7 +210,11 @@ def cmd_match(args: argparse.Namespace) -> None:
         "SELECT id, captured_at FROM captures WHERE captured_at IS NOT NULL"
     ).fetchall()
     recordings = conn.execute(
-        "SELECT id, start_at, end_at FROM recordings WHERE start_at IS NOT NULL AND end_at IS NOT NULL"
+        """
+        SELECT id, start_at, end_at, duration_seconds
+        FROM recordings
+        WHERE start_at IS NOT NULL AND end_at IS NOT NULL
+        """
     ).fetchall()
     matched = 0
     candidates = 0
@@ -222,34 +228,79 @@ def cmd_match(args: argparse.Namespace) -> None:
             if (start_at.timestamp() - window_seconds) <= captured_at.timestamp() <= (
                 end_at.timestamp() + window_seconds
             ):
-                hits.append((recording["id"], (captured_at - start_at).total_seconds()))
+                source_seconds = (captured_at - start_at).total_seconds()
+                hits.append(
+                    (
+                        recording["id"],
+                        source_seconds,
+                        calculate_match_score(
+                            captured_at=captured_at,
+                            start_at=start_at,
+                            end_at=end_at,
+                            window_seconds=window_seconds,
+                        ),
+                    )
+                )
         if hits:
             matched += 1
             candidates += len(hits)
         scored_hits = []
-        for recording_id, source_seconds in hits:
-            confidence = 0.9 if source_seconds >= 0 else 0.6
-            scored_hits.append((recording_id, source_seconds, confidence))
+        for recording_id, source_seconds, score in hits:
+            confidence, reason = score
+            if len(hits) > 1:
+                confidence = max(0.0, round(confidence - min(0.2, 0.04 * (len(hits) - 1)), 3))
+                reason = f"{reason}; multi_candidate_penalty={len(hits)}"
+            scored_hits.append((recording_id, source_seconds, confidence, reason))
         best = sorted(scored_hits, key=lambda item: (-item[2], abs(item[1])))[0] if scored_hits else None
-        for recording_id, source_seconds, confidence in scored_hits:
+        for recording_id, source_seconds, confidence, reason in scored_hits:
             conn.execute(
                 """
                 INSERT OR REPLACE INTO capture_recording_matches (
-                    capture_id, recording_id, source_time_seconds, confidence, is_best, method
-                ) VALUES (?, ?, ?, ?, ?, 'time-window')
+                    capture_id, recording_id, source_time_seconds, confidence,
+                    confidence_reason, is_best, method
+                ) VALUES (?, ?, ?, ?, ?, ?, 'time-window')
                 """,
                 (
                     capture["id"],
                     recording_id,
                     source_seconds,
                     confidence,
+                    reason,
                     1 if best and recording_id == best[0] else 0,
                 ),
             )
     conn.commit()
+    conn.close()
     print(f"captures considered: {len(captures)}")
     print(f"captures matched: {matched}")
     print(f"match candidates: {candidates}")
+
+
+def calculate_match_score(
+    *,
+    captured_at: datetime,
+    start_at: datetime,
+    end_at: datetime,
+    window_seconds: float,
+) -> tuple[float, str]:
+    capture_ts = captured_at.timestamp()
+    start_ts = start_at.timestamp()
+    end_ts = end_at.timestamp()
+    duration = max(1.0, end_ts - start_ts)
+    if start_ts <= capture_ts <= end_ts:
+        edge_distance = min(capture_ts - start_ts, end_ts - capture_ts)
+        edge_ratio = min(1.0, edge_distance / min(300.0, duration / 2))
+        confidence = 0.72 + 0.23 * edge_ratio
+        return round(confidence, 3), f"inside_recording; edge_ratio={edge_ratio:.3f}"
+    if capture_ts < start_ts:
+        outside_seconds = start_ts - capture_ts
+        side = "before_start"
+    else:
+        outside_seconds = capture_ts - end_ts
+        side = "after_end"
+    window_ratio = 1.0 - min(1.0, outside_seconds / max(1.0, window_seconds))
+    confidence = 0.35 + 0.25 * window_ratio
+    return round(confidence, 3), f"{side}; outside_seconds={outside_seconds:.1f}"
 
 
 def cmd_probe_subtitles(args: argparse.Namespace) -> None:
@@ -506,6 +557,7 @@ def cmd_review_ambiguous(args: argparse.Namespace) -> None:
     ).fetchall()
     if not rows:
         print("曖昧なマッチ候補はありません")
+        conn.close()
         return
     for row in rows:
         print(
@@ -525,6 +577,7 @@ def cmd_review_ambiguous(args: argparse.Namespace) -> None:
                 SELECT
                     ROUND(m.source_time_seconds, 1) AS source_time_seconds,
                     m.confidence,
+                    m.confidence_reason,
                     m.is_best,
                     r.title,
                     r.path
@@ -543,11 +596,13 @@ def cmd_review_ambiguous(args: argparse.Namespace) -> None:
                             "best" if candidate["is_best"] else "candidate",
                             str(candidate["source_time_seconds"]),
                             str(candidate["confidence"]),
+                            candidate["confidence_reason"] or "",
                             candidate["title"] or "",
                             candidate["path"],
                         ]
                     )
                 )
+    conn.close()
 
 
 def fetch_capture_detail(conn: sqlite3.Connection, capture_id: int) -> dict | None:
@@ -574,6 +629,7 @@ def fetch_capture_detail(conn: sqlite3.Connection, capture_id: int) -> dict | No
                 m.recording_id,
                 m.source_time_seconds,
                 m.confidence,
+                m.confidence_reason,
                 m.is_best,
                 m.method,
                 r.path AS recording_path,
@@ -699,6 +755,7 @@ def cmd_backfill_annotations(args: argparse.Namespace) -> None:
             c.path AS capture_path,
             m.source_time_seconds,
             m.confidence,
+            m.confidence_reason,
             r.id AS recording_id,
             r.path AS recording_path,
             r.title,
@@ -732,6 +789,7 @@ def cmd_backfill_annotations(args: argparse.Namespace) -> None:
             "recording_file_path": row["recording_path"],
             "playback_position_seconds": row["source_time_seconds"],
             "match_confidence": row["confidence"],
+            "match_confidence_reason": row["confidence_reason"],
             "title": row["title"],
             "normalized_title": row["normalized_title"],
             "series_title": row["series_title"],
@@ -756,6 +814,7 @@ def cmd_backfill_annotations(args: argparse.Namespace) -> None:
                         str(result.capture_id),
                         row["title"] or "",
                         str(row["source_time_seconds"]),
+                        row["confidence_reason"] or "",
                         row["recording_path"],
                     ]
                 )
@@ -836,6 +895,7 @@ def print_capture_detail(detail: dict) -> None:
                         f"recording_id={match['recording_id']}",
                         f"source_time_seconds={match['source_time_seconds']}",
                         f"confidence={match['confidence']}",
+                        f"reason={match['confidence_reason'] or ''}",
                         match["title"] or "",
                         match["recording_path"],
                     ]
@@ -867,6 +927,7 @@ EXPORT_QUERIES = {
             r.title,
             m.source_time_seconds,
             m.confidence,
+            m.confidence_reason,
             m.is_best,
             m.method
         FROM capture_recording_matches m

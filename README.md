@@ -53,7 +53,9 @@ python -m anicapshelf --db .\anicapshelf.db review-unmatched --limit 50
 ```
 
 複数の録画候補に当たっている曖昧なキャプチャを確認します。
-候補の先頭には `best` または `candidate` が表示されます。
+候補の先頭には `best` または `candidate` が表示されます。確度スコアは、
+録画時間内か、番組端に近すぎないか、前後猶予内か、複数候補があるかを使って
+計算し、理由も保存します。
 
 ```powershell
 python -m anicapshelf --db .\anicapshelf.db review-ambiguous --limit 20 --show-candidates
