@@ -86,6 +86,7 @@ python -m anicapshelf --db .\anicapshelf.db serve-api --host 127.0.0.1 --port 87
 最小APIは `POST /api/captures/annotated` です。`multipart/form-data` で
 `image` と `metadata` JSON文字列を送ると、画像を保存し、
 `capture_annotations` に録画ID、録画パス、再生位置などを残します。
+`tags` または `quick_tags` は JSON配列かカンマ区切り文字列で送れます。
 同じ録画パスの字幕がDBにあり、再生位置の前後に字幕が見つかった場合は、
 `capture_subtitle_links` に自動で紐づけます。
 KonomiTV 側へ差し込む最小クライアントは

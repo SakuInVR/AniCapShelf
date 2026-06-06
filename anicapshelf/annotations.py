@@ -76,7 +76,8 @@ def save_annotated_capture(
         ),
     )
     capture_id = int(cursor.fetchone()["id"])
-    tags_json = json.dumps(tags or [], ensure_ascii=False)
+    normalized_tags = normalize_tags(tags or [])
+    tags_json = json.dumps(normalized_tags, ensure_ascii=False)
     metadata_json = json.dumps(metadata, ensure_ascii=False, sort_keys=True)
     annotation_cursor = conn.execute(
         """
@@ -165,6 +166,18 @@ def optional_float(value: object) -> float | None:
 def safe_filename(value: str) -> str:
     safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", value.strip())
     return safe.strip("._") or "unknown"
+
+
+def normalize_tags(tags: list[str]) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for tag in tags:
+        value = str(tag).strip()
+        if not value or value in seen:
+            continue
+        normalized.append(value)
+        seen.add(value)
+    return normalized
 
 
 def attach_nearby_subtitles(

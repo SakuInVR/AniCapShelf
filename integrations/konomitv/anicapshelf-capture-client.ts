@@ -1,5 +1,16 @@
 export type AniCapShelfTag = string;
 
+export const ANICAPSHELF_QUICK_TAGS = [
+  "SNS候補",
+  "アイキャッチ",
+  "OP",
+  "ED",
+  "名シーン",
+  "要整理",
+] as const;
+
+export type AniCapShelfQuickTag = (typeof ANICAPSHELF_QUICK_TAGS)[number];
+
 export type KonomiTVRecordedProgram = {
   id?: number | string;
   title?: string;
@@ -23,6 +34,7 @@ export type AniCapShelfCaptureInput = {
   playbackPositionSeconds?: number | null;
   capturedAt?: Date;
   tags?: AniCapShelfTag[];
+  quickTags?: AniCapShelfQuickTag[];
   note?: string;
   konomitvUrl?: string;
 };
@@ -43,8 +55,9 @@ export async function uploadAnnotatedCapture(
   const formData = new FormData();
   formData.append("image", input.image, input.filename);
   formData.append("metadata", JSON.stringify(metadata));
-  if (input.tags && input.tags.length > 0) {
-    formData.append("tags", JSON.stringify(input.tags));
+  const tags = mergeTags(input.tags, input.quickTags);
+  if (tags.length > 0) {
+    formData.append("tags", JSON.stringify(tags));
   }
   if (input.note) {
     formData.append("note", input.note);
@@ -92,3 +105,12 @@ export function normalizeKonomiTVTime(value: string | number | null | undefined)
   return value;
 }
 
+export function mergeTags(
+  tags: AniCapShelfTag[] | undefined,
+  quickTags: AniCapShelfQuickTag[] | undefined,
+): AniCapShelfTag[] {
+  const merged = [...(tags ?? []), ...(quickTags ?? [])]
+    .map((tag) => tag.trim())
+    .filter((tag) => tag.length > 0);
+  return [...new Set(merged)];
+}

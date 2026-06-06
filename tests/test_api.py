@@ -20,7 +20,10 @@ def test_annotated_capture_api_accepts_multipart_post(tmp_path: Path):
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
-        response = post_annotated_capture(server.server_address[1])
+        response = post_annotated_capture(
+            server.server_address[1],
+            expected_allow_origin="http://127.0.0.1:7000",
+        )
     finally:
         server.shutdown()
         server.server_close()
@@ -31,7 +34,36 @@ def test_annotated_capture_api_accepts_multipart_post(tmp_path: Path):
     assert Path(response["image_path"]).exists()
 
 
-def post_annotated_capture(port: int) -> dict:
+def test_annotated_capture_api_accepts_quick_tags(tmp_path: Path):
+    server = AniCapShelfServer(
+        ("127.0.0.1", 0),
+        AniCapShelfRequestHandler,
+        db_path=str(tmp_path / "api.db"),
+        capture_output_root=tmp_path / "captures",
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        response = post_annotated_capture(
+            server.server_address[1],
+            tag_field="quick_tags",
+            tag_value="SNS候補, アイキャッチ",
+        )
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+    assert response["capture_id"] == 1
+
+
+def post_annotated_capture(
+    port: int,
+    *,
+    tag_field: str = "tags",
+    tag_value: str | None = None,
+    expected_allow_origin: str | None = None,
+) -> dict:
     boundary = "----AniCapShelf" + uuid.uuid4().hex
     metadata = json.dumps(
         {
@@ -44,7 +76,7 @@ def post_annotated_capture(port: int) -> dict:
     parts: list[bytes] = []
     add_file(parts, boundary, "image", "capture.jpg", b"api image", "image/jpeg")
     add_field(parts, boundary, "metadata", metadata)
-    add_field(parts, boundary, "tags", json.dumps(["SNS候補"], ensure_ascii=False))
+    add_field(parts, boundary, tag_field, tag_value or json.dumps(["SNS候補"], ensure_ascii=False))
     body = b"".join(parts) + f"--{boundary}--\r\n".encode("utf-8")
     request = urllib.request.Request(
         f"http://127.0.0.1:{port}/api/captures/annotated",
@@ -54,7 +86,8 @@ def post_annotated_capture(port: int) -> dict:
     )
     with urllib.request.urlopen(request, timeout=5) as response:
         assert response.status == 201
-        assert response.headers["access-control-allow-origin"] == "http://127.0.0.1:7000"
+        if expected_allow_origin:
+            assert response.headers["access-control-allow-origin"] == expected_allow_origin
         return json.loads(response.read().decode("utf-8"))
 
 

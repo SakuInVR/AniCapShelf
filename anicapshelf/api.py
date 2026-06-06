@@ -65,7 +65,7 @@ class AniCapShelfRequestHandler(BaseHTTPRequestHandler):
             if not isinstance(metadata, dict):
                 raise BadRequest("metadata must be a JSON object")
             metadata.setdefault("content_type", image_item.content_type)
-            tags = parse_optional_json_list(payload.get("tags"))
+            tags = parse_optional_tags(payload.get("tags") or payload.get("quick_tags"))
             note_value = payload.get("note")
             note = note_value if isinstance(note_value, str) and note_value else None
             conn = connect(self.server.db_path)
@@ -158,13 +158,13 @@ class BadRequest(Exception):
     pass
 
 
-def parse_optional_json_list(value: str | UploadedFile | None) -> list[str]:
+def parse_optional_tags(value: str | UploadedFile | None) -> list[str]:
     if value is None or isinstance(value, UploadedFile) or value == "":
         return []
     try:
         parsed = json.loads(value)
-    except json.JSONDecodeError as exc:
-        raise BadRequest("tags must be a JSON array") from exc
+    except json.JSONDecodeError:
+        return [item.strip() for item in value.split(",") if item.strip()]
     if not isinstance(parsed, list) or not all(isinstance(item, str) for item in parsed):
         raise BadRequest("tags must be a JSON array of strings")
     return parsed

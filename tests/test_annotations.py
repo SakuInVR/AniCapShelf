@@ -69,6 +69,29 @@ def test_save_annotated_capture_stores_source_metadata(tmp_path: Path):
     conn.close()
 
 
+def test_save_annotated_capture_normalizes_tags(tmp_path: Path):
+    db_path = tmp_path / "test.db"
+    output_root = tmp_path / "captures"
+    conn = connect(db_path)
+    init_db(conn)
+
+    result = save_annotated_capture(
+        conn,
+        image_bytes=b"capture image",
+        original_filename="capture.jpg",
+        output_root=output_root,
+        metadata={"source_app": "KonomiTV"},
+        tags=[" SNS候補 ", "SNS候補", "", "アイキャッチ"],
+    )
+    tags_json = conn.execute(
+        "SELECT tags_json FROM capture_annotations WHERE id = ?",
+        (result.annotation_id,),
+    ).fetchone()["tags_json"]
+    conn.close()
+
+    assert json.loads(tags_json) == ["SNS候補", "アイキャッチ"]
+
+
 def test_export_annotations_jsonl(tmp_path: Path, capsys):
     db_path = tmp_path / "test.db"
     output_root = tmp_path / "captures"
