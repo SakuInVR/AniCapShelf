@@ -7,6 +7,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs, urlparse
 
 from .annotations import save_annotated_capture
 from .db import connect, init_db
@@ -34,8 +35,20 @@ class AniCapShelfRequestHandler(BaseHTTPRequestHandler):
     server: AniCapShelfServer
 
     def do_GET(self) -> None:
-        if self.path == "/health":
+        parsed = urlparse(self.path)
+        if parsed.path == "/health":
             self.write_json(HTTPStatus.OK, {"ok": True, "app": "AniCapShelf"})
+            return
+        if parsed.path.startswith("/api/") and not self.is_authorized():
+            self.write_json(HTTPStatus.UNAUTHORIZED, {"error": "unauthorized"})
+            return
+        try:
+            payload = self.handle_api_get(parsed.path, parse_qs(parsed.query))
+        except BadRequest as exc:
+            self.write_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+            return
+        if payload is not None:
+            self.write_json(HTTPStatus.OK, payload)
             return
         self.write_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
 
@@ -99,6 +112,277 @@ class AniCapShelfRequestHandler(BaseHTTPRequestHandler):
             self.write_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
         except Exception as exc:
             self.write_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": str(exc)})
+
+    def handle_api_get(self, path: str, query: dict[str, list[str]]) -> dict[str, Any] | None:
+        if path == "/api/recordings":
+            return {"recordings": self.fetch_recordings(query)}
+        if path == "/api/captures":
+            return {"captures": self.fetch_captures(query)}
+        if path.startswith("/api/captures/"):
+            capture_id = parse_path_int(path, "/api/captures/")
+            detail = self.fetch_capture_detail(capture_id)
+            if detail is None:
+                return {"capture": None}
+            return detail
+        if path == "/api/matches":
+            return {"matches": self.fetch_matches(query)}
+        if path == "/api/subtitles":
+            return {"subtitles": self.fetch_subtitles(query)}
+        if path == "/api/tags":
+            return {"tags": self.fetch_tags()}
+        if path == "/api/collections":
+            return {"collections": self.fetch_collections()}
+        return None
+
+    def fetch_recordings(self, query: dict[str, list[str]]) -> list[dict[str, Any]]:
+        limit = query_int(query, "limit", 100)
+        conn = connect(self.server.db_path)
+        try:
+            init_db(conn)
+            rows = conn.execute(
+                """
+                SELECT id, path, filename, start_at, end_at, duration_seconds,
+                       title, normalized_title, series_title, episode_number,
+                       subtitle, has_arib_caption, scanned_at
+                FROM recordings
+                ORDER BY start_at DESC, id DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+            return [dict(row) for row in rows]
+        finally:
+            conn.close()
+
+    def fetch_captures(self, query: dict[str, list[str]]) -> list[dict[str, Any]]:
+        limit = query_int(query, "limit", 100)
+        conn = connect(self.server.db_path)
+        try:
+            init_db(conn)
+            rows = conn.execute(
+                """
+                SELECT
+                    c.id,
+                    c.path,
+                    c.filename,
+                    c.captured_at,
+                    c.width,
+                    c.height,
+                    c.source_hint,
+                    best.recording_id,
+                    best.source_time_seconds,
+                    best.confidence,
+                    best.recording_title,
+                    ann.tags_json
+                FROM captures c
+                LEFT JOIN (
+                    SELECT
+                        m.capture_id,
+                        m.recording_id,
+                        m.source_time_seconds,
+                        m.confidence,
+                        r.title AS recording_title
+                    FROM capture_recording_matches m
+                    JOIN recordings r ON r.id = m.recording_id
+                    WHERE m.is_best = 1
+                ) best ON best.capture_id = c.id
+                LEFT JOIN (
+                    SELECT capture_id, tags_json, MAX(id) AS latest_annotation_id
+                    FROM capture_annotations
+                    GROUP BY capture_id
+                ) ann ON ann.capture_id = c.id
+                ORDER BY c.captured_at DESC, c.id DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+            captures = []
+            for row in rows:
+                item = dict(row)
+                item["tags"] = json_loads_or_default(item.pop("tags_json", None), [])
+                captures.append(item)
+            return captures
+        finally:
+            conn.close()
+
+    def fetch_capture_detail(self, capture_id: int) -> dict[str, Any] | None:
+        conn = connect(self.server.db_path)
+        try:
+            init_db(conn)
+            capture = conn.execute("SELECT * FROM captures WHERE id = ?", (capture_id,)).fetchone()
+            if capture is None:
+                return None
+            annotations = [
+                decode_annotation_json(dict(row))
+                for row in conn.execute(
+                    """
+                    SELECT *
+                    FROM capture_annotations
+                    WHERE capture_id = ?
+                    ORDER BY id DESC
+                    """,
+                    (capture_id,),
+                ).fetchall()
+            ]
+            matches = [
+                dict(row)
+                for row in conn.execute(
+                    """
+                    SELECT m.*, r.path AS recording_path, r.title AS recording_title
+                    FROM capture_recording_matches m
+                    JOIN recordings r ON r.id = m.recording_id
+                    WHERE m.capture_id = ?
+                    ORDER BY m.is_best DESC, m.confidence DESC
+                    """,
+                    (capture_id,),
+                ).fetchall()
+            ]
+            subtitles = [
+                dict(row)
+                for row in conn.execute(
+                    """
+                    SELECT
+                        s.id AS subtitle_id,
+                        s.recording_id,
+                        s.cue_index,
+                        s.start_seconds,
+                        s.end_seconds,
+                        s.text,
+                        s.source,
+                        MIN(l.offset_seconds) AS offset_seconds,
+                        GROUP_CONCAT(l.method, ',') AS method
+                    FROM capture_subtitle_links l
+                    JOIN subtitles s ON s.id = l.subtitle_id
+                    WHERE l.capture_id = ?
+                    GROUP BY s.id, s.recording_id, s.cue_index, s.start_seconds,
+                             s.end_seconds, s.text, s.source
+                    ORDER BY ABS(MIN(l.offset_seconds)), COALESCE(s.cue_index, s.id)
+                    """,
+                    (capture_id,),
+                ).fetchall()
+            ]
+            ocr_results = [
+                dict(row)
+                for row in conn.execute(
+                    """
+                    SELECT *
+                    FROM capture_ocr_results
+                    WHERE capture_id = ?
+                    ORDER BY id DESC
+                    """,
+                    (capture_id,),
+                ).fetchall()
+            ]
+            collections = [
+                dict(row)
+                for row in conn.execute(
+                    """
+                    SELECT col.id, col.name, col.description
+                    FROM collection_items item
+                    JOIN collections col ON col.id = item.collection_id
+                    WHERE item.capture_id = ?
+                    ORDER BY col.name
+                    """,
+                    (capture_id,),
+                ).fetchall()
+            ]
+            return {
+                "capture": dict(capture),
+                "annotations": annotations,
+                "matches": matches,
+                "subtitles": subtitles,
+                "ocr_results": ocr_results,
+                "collections": collections,
+            }
+        finally:
+            conn.close()
+
+    def fetch_matches(self, query: dict[str, list[str]]) -> list[dict[str, Any]]:
+        capture_id = query_int(query, "capture_id", None)
+        where = ""
+        params: list[Any] = []
+        if capture_id is not None:
+            where = "WHERE m.capture_id = ?"
+            params.append(capture_id)
+        conn = connect(self.server.db_path)
+        try:
+            init_db(conn)
+            rows = conn.execute(
+                f"""
+                SELECT m.*, c.filename AS capture_filename, r.title AS recording_title,
+                       r.path AS recording_path
+                FROM capture_recording_matches m
+                JOIN captures c ON c.id = m.capture_id
+                JOIN recordings r ON r.id = m.recording_id
+                {where}
+                ORDER BY m.capture_id DESC, m.is_best DESC, m.confidence DESC
+                LIMIT 200
+                """,
+                params,
+            ).fetchall()
+            return [dict(row) for row in rows]
+        finally:
+            conn.close()
+
+    def fetch_subtitles(self, query: dict[str, list[str]]) -> list[dict[str, Any]]:
+        recording_id = query_int(query, "recording_id", None)
+        if recording_id is None:
+            raise BadRequest("recording_id is required")
+        limit = query_int(query, "limit", 200)
+        conn = connect(self.server.db_path)
+        try:
+            init_db(conn)
+            rows = conn.execute(
+                """
+                SELECT *
+                FROM subtitles
+                WHERE recording_id = ?
+                ORDER BY COALESCE(cue_index, id), start_seconds, id
+                LIMIT ?
+                """,
+                (recording_id, limit),
+            ).fetchall()
+            return [dict(row) for row in rows]
+        finally:
+            conn.close()
+
+    def fetch_tags(self) -> list[dict[str, Any]]:
+        conn = connect(self.server.db_path)
+        try:
+            init_db(conn)
+            rows = conn.execute("SELECT tags_json FROM capture_annotations").fetchall()
+            counts: dict[str, int] = {}
+            for row in rows:
+                for tag in json_loads_or_default(row["tags_json"], []):
+                    counts[str(tag)] = counts.get(str(tag), 0) + 1
+            return [
+                {"name": name, "count": count}
+                for name, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+            ]
+        finally:
+            conn.close()
+
+    def fetch_collections(self) -> list[dict[str, Any]]:
+        conn = connect(self.server.db_path)
+        try:
+            init_db(conn)
+            rows = conn.execute(
+                """
+                SELECT
+                    col.id,
+                    col.name,
+                    col.description,
+                    col.created_at,
+                    COUNT(item.capture_id) AS capture_count
+                FROM collections col
+                LEFT JOIN collection_items item ON item.collection_id = col.id
+                GROUP BY col.id
+                ORDER BY col.name
+                """
+            ).fetchall()
+            return [dict(row) for row in rows]
+        finally:
+            conn.close()
 
     def read_multipart(self) -> dict[str, str | "UploadedFile"]:
         content_type = self.headers.get("content-type")
@@ -181,6 +465,42 @@ def parse_optional_tags(value: str | UploadedFile | None) -> list[str]:
     if not isinstance(parsed, list) or not all(isinstance(item, str) for item in parsed):
         raise BadRequest("tags must be a JSON array of strings")
     return parsed
+
+
+def parse_path_int(path: str, prefix: str) -> int:
+    value = path.removeprefix(prefix).strip("/")
+    if not value.isdigit():
+        raise BadRequest("invalid numeric id")
+    return int(value)
+
+
+def query_int(query: dict[str, list[str]], key: str, default: int | None) -> int | None:
+    values = query.get(key)
+    if not values or values[0] == "":
+        return default
+    try:
+        value = int(values[0])
+    except ValueError as exc:
+        raise BadRequest(f"{key} must be an integer") from exc
+    if value < 1:
+        raise BadRequest(f"{key} must be 1 or greater")
+    return value
+
+
+def json_loads_or_default(value: str | None, default: Any) -> Any:
+    if not value:
+        return default
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError:
+        return default
+
+
+def decode_annotation_json(row: dict[str, Any]) -> dict[str, Any]:
+    decoded = dict(row)
+    decoded["tags"] = json_loads_or_default(decoded.pop("tags_json", None), [])
+    decoded["metadata"] = json_loads_or_default(decoded.pop("metadata_json", None), {})
+    return decoded
 
 
 def run_server(

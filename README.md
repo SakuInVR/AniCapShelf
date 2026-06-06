@@ -132,6 +132,18 @@ python -m anicapshelf --db .\anicapshelf.db serve-api --host 127.0.0.1 --port 87
 KonomiTV 側へ差し込む最小クライアントは
 [integrations/konomitv](integrations/konomitv) に置いています。
 
+ブラウザUI向けの読み取りAPIも同じサーバーで提供します。
+
+```text
+GET /api/recordings
+GET /api/captures
+GET /api/captures/{capture_id}
+GET /api/matches?capture_id=1
+GET /api/subtitles?recording_id=1
+GET /api/tags
+GET /api/collections
+```
+
 字幕ストリームをサンプル調査します。
 
 ```powershell

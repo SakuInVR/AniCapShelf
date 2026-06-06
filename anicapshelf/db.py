@@ -143,6 +143,25 @@ CREATE TABLE IF NOT EXISTS capture_ocr_results (
 CREATE INDEX IF NOT EXISTS idx_capture_ocr_results_capture_id
 ON capture_ocr_results(capture_id);
 
+CREATE TABLE IF NOT EXISTS collections (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    description TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS collection_items (
+    collection_id INTEGER NOT NULL,
+    capture_id INTEGER NOT NULL,
+    added_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (collection_id, capture_id),
+    FOREIGN KEY (collection_id) REFERENCES collections(id) ON DELETE CASCADE,
+    FOREIGN KEY (capture_id) REFERENCES captures(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_collection_items_capture_id
+ON collection_items(capture_id);
+
 CREATE TABLE IF NOT EXISTS sharex_history (
     id INTEGER PRIMARY KEY,
     file_path TEXT,
