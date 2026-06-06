@@ -548,6 +548,140 @@ def cmd_review_ambiguous(args: argparse.Namespace) -> None:
                 )
 
 
+def fetch_capture_detail(conn: sqlite3.Connection, capture_id: int) -> dict | None:
+    capture = conn.execute("SELECT * FROM captures WHERE id = ?", (capture_id,)).fetchone()
+    if capture is None:
+        return None
+    annotations = [
+        dict(row)
+        for row in conn.execute(
+            """
+            SELECT *
+            FROM capture_annotations
+            WHERE capture_id = ?
+            ORDER BY id DESC
+            """,
+            (capture_id,),
+        ).fetchall()
+    ]
+    matches = [
+        dict(row)
+        for row in conn.execute(
+            """
+            SELECT
+                m.recording_id,
+                m.source_time_seconds,
+                m.confidence,
+                m.is_best,
+                m.method,
+                r.path AS recording_path,
+                r.title,
+                r.series_title,
+                r.episode_number,
+                r.subtitle
+            FROM capture_recording_matches m
+            JOIN recordings r ON r.id = m.recording_id
+            WHERE m.capture_id = ?
+            ORDER BY m.is_best DESC, m.confidence DESC, ABS(m.source_time_seconds) ASC
+            """,
+            (capture_id,),
+        ).fetchall()
+    ]
+    return {
+        "capture": dict(capture),
+        "annotations": [decode_annotation_json(row) for row in annotations],
+        "matches": matches,
+    }
+
+
+def decode_annotation_json(row: dict) -> dict:
+    decoded = dict(row)
+    decoded["tags"] = json_loads_or_default(decoded.pop("tags_json", None), [])
+    decoded["metadata"] = json_loads_or_default(decoded.pop("metadata_json", None), {})
+    return decoded
+
+
+def json_loads_or_default(value: str | None, default):
+    if not value:
+        return default
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError:
+        return default
+
+
+def cmd_show_capture(args: argparse.Namespace) -> None:
+    conn = connect(args.db)
+    init_db(conn)
+    detail = fetch_capture_detail(conn, args.capture_id)
+    conn.close()
+    if detail is None:
+        raise SystemExit(f"capture not found: {args.capture_id}")
+    if args.format == "json":
+        print(json.dumps(detail, ensure_ascii=False, indent=2, sort_keys=True))
+        return
+    print_capture_detail(detail)
+
+
+def print_capture_detail(detail: dict) -> None:
+    capture = detail["capture"]
+    print(f"capture_id: {capture['id']}")
+    print(f"filename: {capture['filename']}")
+    print(f"path: {capture['path']}")
+    print(f"captured_at: {capture['captured_at'] or ''}")
+    print(f"source_hint: {capture['source_hint'] or ''}")
+    if capture["width"] and capture["height"]:
+        print(f"size: {capture['width']}x{capture['height']}")
+    if detail["annotations"]:
+        print("annotations:")
+        for annotation in detail["annotations"]:
+            print(f"  - annotation_id: {annotation['id']}")
+            print(f"    source_app: {annotation['source_app']}")
+            print(f"    program_id: {annotation['external_program_id'] or ''}")
+            print(f"    video_id: {annotation['external_video_id'] or ''}")
+            print(f"    recording_file_path: {annotation['recording_file_path'] or ''}")
+            print(f"    playback_position_seconds: {annotation['playback_position_seconds'] or ''}")
+            print(f"    source_url: {annotation['source_url'] or ''}")
+            print(f"    tags: {', '.join(annotation['tags'])}")
+            print(f"    note: {annotation['note'] or ''}")
+            metadata = annotation["metadata"]
+            title = metadata.get("title") or ""
+            episode = metadata.get("episode_number")
+            subtitle = metadata.get("subtitle") or ""
+            if title or episode or subtitle:
+                print(f"    title: {format_title(title, episode, subtitle)}")
+    else:
+        print("annotations: none")
+    if detail["matches"]:
+        print("matches:")
+        for match in detail["matches"]:
+            label = "best" if match["is_best"] else "candidate"
+            print(
+                "  - "
+                + "\t".join(
+                    [
+                        label,
+                        f"recording_id={match['recording_id']}",
+                        f"source_time_seconds={match['source_time_seconds']}",
+                        f"confidence={match['confidence']}",
+                        match["title"] or "",
+                        match["recording_path"],
+                    ]
+                )
+            )
+    else:
+        print("matches: none")
+
+
+def format_title(title: str, episode: object, subtitle: str) -> str:
+    parts = [title]
+    if episode is not None:
+        parts.append(f"第{episode}話")
+    if subtitle:
+        parts.append(str(subtitle))
+    return " ".join(str(part) for part in parts if part)
+
+
 EXPORT_QUERIES = {
     "recordings": "SELECT * FROM recordings ORDER BY id",
     "captures": "SELECT * FROM captures ORDER BY id",
@@ -704,6 +838,11 @@ def build_parser() -> argparse.ArgumentParser:
     ambiguous.add_argument("--limit", type=int, default=50)
     ambiguous.add_argument("--show-candidates", action="store_true")
     ambiguous.set_defaults(func=cmd_review_ambiguous)
+
+    show_capture = sub.add_parser("show-capture")
+    show_capture.add_argument("capture_id", type=int)
+    show_capture.add_argument("--format", choices=["text", "json"], default="text")
+    show_capture.set_defaults(func=cmd_show_capture)
 
     export = sub.add_parser("export")
     export.add_argument(

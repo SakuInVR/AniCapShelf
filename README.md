@@ -67,6 +67,14 @@ python -m anicapshelf --db .\anicapshelf.db export captures --format csv --outpu
 python -m anicapshelf --db .\anicapshelf.db export annotations --format jsonl
 ```
 
+キャプチャ1件の詳細を確認します。KonomiTV 連携で保存した元URL、
+動画内時刻、録画パス、タグもここで見られます。
+
+```powershell
+python -m anicapshelf --db .\anicapshelf.db show-capture 1
+python -m anicapshelf --db .\anicapshelf.db show-capture 1 --format json
+```
+
 KonomiTV などの外部ツールから、画像とメタデータを同時保存するローカルAPIを
 起動します。`--capture-output-root` を省略した場合は、設定ファイルの
 `roots.captures` を保存先として使います。

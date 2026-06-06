@@ -92,3 +92,68 @@ def test_export_annotations_jsonl(tmp_path: Path, capsys):
     assert '"source_app": "KonomiTV"' in output
     assert '"playback_position_seconds": 12.5' in output
     conn.close()
+
+
+def test_show_capture_outputs_annotation_source(tmp_path: Path, capsys):
+    db_path = tmp_path / "test.db"
+    output_root = tmp_path / "captures"
+    conn = connect(db_path)
+    init_db(conn)
+    result = save_annotated_capture(
+        conn,
+        image_bytes=b"capture image",
+        original_filename="capture.jpg",
+        output_root=output_root,
+        metadata={
+            "source_app": "KonomiTV",
+            "recorded_program_id": 123,
+            "recording_file_path": "/recorded/anime/example.ts",
+            "playback_position_seconds": 12.5,
+            "konomitv_url": "http://konomitv.local/videos/watch/123",
+            "title": "作品名",
+            "episode_number": 5,
+            "subtitle": "サブタイトル",
+        },
+        tags=["SNS候補"],
+        note="共有したいカット",
+    )
+    conn.close()
+
+    main(["--db", str(db_path), "show-capture", str(result.capture_id)])
+    output = capsys.readouterr().out
+
+    assert "source_app: KonomiTV" in output
+    assert "program_id: 123" in output
+    assert "playback_position_seconds: 12.5" in output
+    assert "source_url: http://konomitv.local/videos/watch/123" in output
+    assert "tags: SNS候補" in output
+    assert "title: 作品名 第5話 サブタイトル" in output
+
+
+def test_show_capture_json_outputs_decoded_metadata(tmp_path: Path, capsys):
+    db_path = tmp_path / "test.db"
+    output_root = tmp_path / "captures"
+    conn = connect(db_path)
+    init_db(conn)
+    result = save_annotated_capture(
+        conn,
+        image_bytes=b"capture image",
+        original_filename="capture.jpg",
+        output_root=output_root,
+        metadata={
+            "source_app": "KonomiTV",
+            "recorded_program_id": 123,
+            "playback_position_seconds": 12.5,
+            "title": "作品名",
+        },
+        tags=["SNS候補"],
+    )
+    conn.close()
+
+    main(["--db", str(db_path), "show-capture", str(result.capture_id), "--format", "json"])
+    output = capsys.readouterr().out
+    payload = json.loads(output)
+
+    assert payload["capture"]["id"] == result.capture_id
+    assert payload["annotations"][0]["metadata"]["title"] == "作品名"
+    assert payload["annotations"][0]["tags"] == ["SNS候補"]
