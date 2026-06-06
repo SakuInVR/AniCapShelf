@@ -631,6 +631,7 @@ def cmd_serve_api(args: argparse.Namespace) -> None:
         port=args.port,
         db_path=args.db,
         capture_output_root=capture_output_root,
+        allow_origin=args.allow_origin,
     )
 
 
@@ -720,6 +721,10 @@ def build_parser() -> argparse.ArgumentParser:
     api.add_argument(
         "--capture-output-root",
         help="アノテーションAPIで受け取った画像の保存先。未指定時は roots.captures を使います。",
+    )
+    api.add_argument(
+        "--allow-origin",
+        help="ブラウザ連携を許可するKonomiTVのorigin。例: http://127.0.0.1:7000",
     )
     api.set_defaults(func=cmd_serve_api)
 

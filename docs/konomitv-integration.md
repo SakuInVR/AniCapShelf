@@ -166,12 +166,16 @@ KonomiTV が URL パラメータで直接シークできるかは、今回の調
 - キャプチャ画像そのものを二重保存するか、KonomiTV の保存ファイルを参照するかは
   運用方針で決める必要があります。
 
-## 次に作るもの
+## 現在できているもの
 
-次の実装単位は小さく切れます。
+次の最小構成は実装済みです。
 
-1. AniCapShelf のローカルAPIサーバーを追加する。
+1. AniCapShelf のローカルAPIサーバーを `serve-api` で起動する。
 2. `POST /api/captures/annotated` で画像とJSONメタデータを保存する。
 3. KonomiTV 連携用の最小クライアントスクリプトを `integrations/konomitv/` に置く。
-4. キャプチャ詳細を JSON で確認できる `show-capture` または `export annotations`
-   コマンドを追加する。
+4. ブラウザから送れるように、必要な KonomiTV origin だけを `--allow-origin` で
+   許可する。
+5. `export annotations` で保存したアノテーションをJSON/CSVとして確認する。
+
+次は、キャプチャ詳細を人間が読みやすく確認できる `show-capture` と、
+キャプチャ時のクイックタグ指定を追加します。

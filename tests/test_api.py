@@ -15,6 +15,7 @@ def test_annotated_capture_api_accepts_multipart_post(tmp_path: Path):
         AniCapShelfRequestHandler,
         db_path=str(tmp_path / "api.db"),
         capture_output_root=tmp_path / "captures",
+        allow_origin="http://127.0.0.1:7000",
     )
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -53,6 +54,7 @@ def post_annotated_capture(port: int) -> dict:
     )
     with urllib.request.urlopen(request, timeout=5) as response:
         assert response.status == 201
+        assert response.headers["access-control-allow-origin"] == "http://127.0.0.1:7000"
         return json.loads(response.read().decode("utf-8"))
 
 
@@ -76,4 +78,3 @@ def add_file(
         f'filename="{filename}"\r\nContent-Type: {content_type}\r\n\r\n'
     )
     parts.append(header.encode("utf-8") + content + b"\r\n")
-
