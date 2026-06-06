@@ -112,6 +112,7 @@ python -m anicapshelf --db .\anicapshelf.db serve-api --host 127.0.0.1 --port 87
 `capture_annotations` に録画ID、録画パス、再生位置などを残します。
 `tags` または `quick_tags` は JSON配列かカンマ区切り文字列で送れます。
 同じ録画パスの字幕がDBにあり、再生位置の前後に字幕が見つかった場合は、
+時間窓内の字幕と、最も近い字幕キューの前後文脈を
 `capture_subtitle_links` に自動で紐づけます。
 KonomiTV 側へ差し込む最小クライアントは
 [integrations/konomitv](integrations/konomitv) に置いています。

@@ -240,6 +240,7 @@ def attach_nearby_subtitles(
     capture_id: int,
     metadata: dict,
     window_seconds: float = 10.0,
+    context_cues: int = 1,
 ) -> int:
     recording_file_path = optional_text(metadata.get("recording_file_path"))
     playback_position = optional_float(metadata.get("playback_position_seconds"))
@@ -253,7 +254,7 @@ def attach_nearby_subtitles(
         return 0
     rows = conn.execute(
         """
-        SELECT id, start_seconds
+        SELECT id, cue_index, start_seconds
         FROM subtitles
         WHERE recording_id = ?
           AND start_seconds BETWEEN ? AND ?
@@ -266,20 +267,61 @@ def attach_nearby_subtitles(
             playback_position,
         ),
     ).fetchall()
-    for row in rows:
+    linked: dict[int, tuple[float, str]] = {
+        row["id"]: (
+            float(row["start_seconds"]) - playback_position,
+            "annotation-time-window",
+        )
+        for row in rows
+    }
+    nearest = conn.execute(
+        """
+        SELECT id, cue_index, start_seconds
+        FROM subtitles
+        WHERE recording_id = ?
+        ORDER BY ABS(start_seconds - ?), start_seconds
+        LIMIT 1
+        """,
+        (recording["id"], playback_position),
+    ).fetchone()
+    if nearest is not None and nearest["cue_index"] is not None and context_cues > 0:
+        context_rows = conn.execute(
+            """
+            SELECT id, cue_index, start_seconds
+            FROM subtitles
+            WHERE recording_id = ?
+              AND cue_index BETWEEN ? AND ?
+            ORDER BY cue_index
+            """,
+            (
+                recording["id"],
+                int(nearest["cue_index"]) - context_cues,
+                int(nearest["cue_index"]) + context_cues,
+            ),
+        ).fetchall()
+        for row in context_rows:
+            linked.setdefault(
+                row["id"],
+                (
+                    float(row["start_seconds"]) - playback_position,
+                    "annotation-cue-context",
+                ),
+            )
+    for subtitle_id, (offset_seconds, method) in linked.items():
         conn.execute(
             """
             INSERT OR REPLACE INTO capture_subtitle_links (
                 capture_id, subtitle_id, offset_seconds, method
-            ) VALUES (?, ?, ?, 'annotation-time-window')
+            ) VALUES (?, ?, ?, ?)
             """,
             (
                 capture_id,
-                row["id"],
-                float(row["start_seconds"]) - playback_position,
+                subtitle_id,
+                offset_seconds,
+                method,
             ),
         )
-    return len(rows)
+    return len(linked)
 
 
 def iso(dt: datetime | None) -> str | None:

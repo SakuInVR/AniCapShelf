@@ -207,13 +207,15 @@ def test_annotated_capture_links_nearby_subtitles(tmp_path: Path, capsys):
     recording_id = conn.execute("SELECT id FROM recordings").fetchone()["id"]
     conn.executemany(
         """
-        INSERT INTO subtitles (recording_id, start_seconds, end_seconds, text, raw_text, source)
-        VALUES (?, ?, ?, ?, ?, 'arib_caption')
+        INSERT INTO subtitles (
+            recording_id, cue_index, start_seconds, end_seconds, text, raw_text, source
+        ) VALUES (?, ?, ?, ?, ?, ?, 'arib_caption')
         """,
         [
-            (recording_id, 90.0, 92.0, "少し前のセリフ", "少し前のセリフ"),
-            (recording_id, 100.0, 102.0, "ちょうど近いセリフ", "ちょうど近いセリフ"),
-            (recording_id, 120.0, 122.0, "遠いセリフ", "遠いセリフ"),
+            (recording_id, 1, 90.0, 92.0, "少し前のセリフ", "少し前のセリフ"),
+            (recording_id, 2, 100.0, 102.0, "ちょうど近いセリフ", "ちょうど近いセリフ"),
+            (recording_id, 3, 120.0, 122.0, "次の文脈セリフ", "次の文脈セリフ"),
+            (recording_id, 4, 150.0, 152.0, "遠いセリフ", "遠いセリフ"),
         ],
     )
     conn.commit()
@@ -231,13 +233,17 @@ def test_annotated_capture_links_nearby_subtitles(tmp_path: Path, capsys):
     linked = conn.execute("SELECT COUNT(*) FROM capture_subtitle_links").fetchone()[0]
     conn.close()
 
-    assert linked == 2
+    assert linked == 3
     main(["--db", str(db_path), "show-capture", str(result.capture_id)])
     output = capsys.readouterr().out
 
     assert "subtitles:" in output
+    assert "#1" in output
+    assert "#2" in output
+    assert "#3" in output
     assert "ちょうど近いセリフ" in output
     assert "少し前のセリフ" in output
+    assert "次の文脈セリフ" in output
     assert "遠いセリフ" not in output
 
 

@@ -816,12 +816,20 @@ def fetch_capture_detail(conn: sqlite3.Connection, capture_id: int) -> dict | No
                 s.end_seconds,
                 s.text,
                 s.source,
-                l.offset_seconds,
-                l.method
+                MIN(l.offset_seconds) AS offset_seconds,
+                GROUP_CONCAT(l.method, ',') AS method
             FROM capture_subtitle_links l
             JOIN subtitles s ON s.id = l.subtitle_id
             WHERE l.capture_id = ?
-            ORDER BY ABS(l.offset_seconds), COALESCE(s.cue_index, s.id), s.start_seconds
+            GROUP BY
+                s.id,
+                s.recording_id,
+                s.cue_index,
+                s.start_seconds,
+                s.end_seconds,
+                s.text,
+                s.source
+            ORDER BY ABS(MIN(l.offset_seconds)), COALESCE(s.cue_index, s.id), s.start_seconds
             """,
             (capture_id,),
         ).fetchall()
