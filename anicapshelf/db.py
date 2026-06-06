@@ -128,6 +128,21 @@ CREATE TABLE IF NOT EXISTS capture_subtitle_links (
 CREATE INDEX IF NOT EXISTS idx_capture_subtitle_links_capture_id
 ON capture_subtitle_links(capture_id);
 
+CREATE TABLE IF NOT EXISTS capture_ocr_results (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    capture_id INTEGER NOT NULL,
+    engine TEXT NOT NULL,
+    text TEXT NOT NULL,
+    raw_text TEXT,
+    language TEXT,
+    confidence REAL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (capture_id) REFERENCES captures(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_capture_ocr_results_capture_id
+ON capture_ocr_results(capture_id);
+
 CREATE TABLE IF NOT EXISTS sharex_history (
     id INTEGER PRIMARY KEY,
     file_path TEXT,

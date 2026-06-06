@@ -43,6 +43,44 @@ def test_scan_captures_reports_created_and_skipped(tmp_path: Path, capsys):
     assert "skipped: 1" in second
 
 
+def test_ocr_captures_saves_results_and_show_capture_outputs_ocr(
+    tmp_path: Path, capsys, monkeypatch
+):
+    import sqlite3
+
+    captures_root = tmp_path / "captures"
+    captures_root.mkdir()
+    image_path = captures_root / "Capture_20260115-015919.jpg"
+    image_path.write_bytes(b"image")
+    db_path = tmp_path / "test.db"
+
+    main(["--db", str(db_path), "scan-captures", "--captures-root", str(captures_root)])
+    capsys.readouterr()
+
+    def fake_ocr(path, *, language="jpn+eng", timeout=60):
+        assert Path(path) == image_path
+        assert language == "jpn+eng"
+        return "ＥＤカード・提供バック"
+
+    monkeypatch.setattr("anicapshelf.cli.run_tesseract_ocr", fake_ocr)
+
+    main(["--db", str(db_path), "ocr-captures", "--only-missing", "--verbose"])
+    output = capsys.readouterr().out
+
+    assert "ocr results saved: 1" in output
+    con = sqlite3.connect(db_path)
+    row = con.execute(
+        "SELECT engine, text, raw_text, language FROM capture_ocr_results"
+    ).fetchone()
+    con.close()
+    assert row == ("tesseract", "EDカード 提供バック", "ＥＤカード・提供バック", "jpn+eng")
+
+    main(["--db", str(db_path), "show-capture", "1"])
+    detail_output = capsys.readouterr().out
+    assert "ocr:" in detail_output
+    assert "EDカード 提供バック" in detail_output
+
+
 def test_scan_records_preserves_existing_caption_probe(tmp_path: Path, capsys):
     records_root = tmp_path / "records"
     records_root.mkdir()

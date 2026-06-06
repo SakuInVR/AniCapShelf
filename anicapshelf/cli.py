@@ -5,6 +5,7 @@ import csv
 import json
 import os
 import sqlite3
+import subprocess
 from datetime import datetime
 from pathlib import Path
 
@@ -19,6 +20,7 @@ from .media import (
     normalize_search_text,
     parse_srt,
     probe_streams,
+    run_tesseract_ocr,
     stream_to_json,
 )
 from .parsers import parse_capture_time, parse_recording_name
@@ -201,6 +203,85 @@ def cmd_scan_captures(args: argparse.Namespace) -> None:
     print(f"created: {created}")
     print(f"updated: {updated}")
     print(f"skipped: {skipped}")
+
+
+def cmd_ocr_captures(args: argparse.Namespace) -> None:
+    if args.engine != "tesseract":
+        raise SystemExit("supported OCR engine is currently only: tesseract")
+    if args.commit_every < 1:
+        raise SystemExit("--commit-every must be 1 or greater")
+    conn = connect(args.db)
+    init_db(conn)
+    where = ["c.path IS NOT NULL"]
+    if args.only_missing:
+        where.append(
+            """
+            NOT EXISTS (
+                SELECT 1
+                FROM capture_ocr_results o
+                WHERE o.capture_id = c.id
+                  AND o.engine = ?
+                  AND COALESCE(o.language, '') = ?
+            )
+            """
+        )
+    params: list[object] = []
+    if args.only_missing:
+        params.extend([args.engine, args.language])
+    query = f"""
+        SELECT c.id, c.path, c.filename
+        FROM captures c
+        WHERE {' AND '.join(where)}
+        ORDER BY c.id
+    """
+    if args.limit:
+        query += " LIMIT ?"
+        params.append(args.limit)
+    rows = conn.execute(query, params).fetchall()
+    processed = 0
+    saved = 0
+    skipped = 0
+    failed = 0
+    for row in rows:
+        path = Path(row["path"])
+        if not path.exists():
+            skipped += 1
+            if args.verbose:
+                print(f"skip missing file: {row['id']}\t{row['path']}")
+            continue
+        processed += 1
+        try:
+            raw_text = run_tesseract_ocr(path, language=args.language, timeout=args.timeout)
+        except (RuntimeError, subprocess.TimeoutExpired) as exc:
+            failed += 1
+            print(f"failed: {row['id']}\t{exc}")
+            continue
+        text = normalize_search_text(raw_text)
+        if not text:
+            skipped += 1
+            if args.verbose:
+                print(f"skip empty ocr: {row['id']}\t{row['filename']}")
+            continue
+        conn.execute(
+            """
+            INSERT INTO capture_ocr_results (
+                capture_id, engine, text, raw_text, language, confidence
+            ) VALUES (?, ?, ?, ?, ?, NULL)
+            """,
+            (row["id"], args.engine, text, raw_text, args.language),
+        )
+        saved += 1
+        if args.verbose:
+            print(f"ocr saved: {row['id']}\t{row['filename']}\t{text[:80]}")
+        if processed % args.commit_every == 0:
+            conn.commit()
+    conn.commit()
+    conn.close()
+    print(f"captures selected: {len(rows)}")
+    print(f"captures processed: {processed}")
+    print(f"captures skipped: {skipped}")
+    print(f"captures failed: {failed}")
+    print(f"ocr results saved: {saved}")
 
 
 def cmd_match(args: argparse.Namespace) -> None:
@@ -780,6 +861,18 @@ def fetch_capture_detail(conn: sqlite3.Connection, capture_id: int) -> dict | No
             (capture_id,),
         ).fetchall()
     ]
+    ocr_results = [
+        dict(row)
+        for row in conn.execute(
+            """
+            SELECT *
+            FROM capture_ocr_results
+            WHERE capture_id = ?
+            ORDER BY id DESC
+            """,
+            (capture_id,),
+        ).fetchall()
+    ]
     matches = [
         dict(row)
         for row in conn.execute(
@@ -837,6 +930,7 @@ def fetch_capture_detail(conn: sqlite3.Connection, capture_id: int) -> dict | No
     return {
         "capture": dict(capture),
         "annotations": [decode_annotation_json(row) for row in annotations],
+        "ocr_results": ocr_results,
         "source_jump": build_source_jump(annotations),
         "matches": matches,
         "subtitles": subtitles,
@@ -1006,6 +1100,7 @@ def rebuild_search_index(conn: sqlite3.Connection) -> dict[str, int]:
         "recordings_indexed": index_recordings(conn),
         "subtitles_indexed": index_subtitles(conn),
         "annotations_indexed": index_annotations(conn),
+        "ocr_indexed": index_ocr_results(conn),
     }
     conn.commit()
     return counts
@@ -1125,6 +1220,41 @@ def index_annotations(conn: sqlite3.Connection) -> int:
                 body,
                 build_search_text(*tags),
                 row["source_app"] or "annotations",
+            ),
+        )
+    return len(rows)
+
+
+def index_ocr_results(conn: sqlite3.Connection) -> int:
+    rows = conn.execute(
+        """
+        SELECT
+            o.id,
+            o.capture_id,
+            o.text,
+            o.raw_text,
+            o.engine,
+            o.language,
+            c.filename,
+            c.path
+        FROM capture_ocr_results o
+        JOIN captures c ON c.id = o.capture_id
+        ORDER BY o.id
+        """
+    ).fetchall()
+    for row in rows:
+        conn.execute(
+            """
+            INSERT INTO search_index (
+                entity_type, entity_id, capture_id, recording_id, title, body, tags, source
+            ) VALUES ('ocr', ?, ?, NULL, ?, ?, '', ?)
+            """,
+            (
+                row["id"],
+                row["capture_id"],
+                build_search_text(row["filename"], row["path"]),
+                build_search_text(row["text"], row["raw_text"], row["language"]),
+                row["engine"] or "ocr",
             ),
         )
     return len(rows)
@@ -1255,6 +1385,15 @@ def print_capture_detail(detail: dict) -> None:
                 print(f"    title: {format_title(title, episode, subtitle)}")
     else:
         print("annotations: none")
+    if detail["ocr_results"]:
+        print("ocr:")
+        for result in detail["ocr_results"]:
+            print(f"  - ocr_id: {result['id']}")
+            print(f"    engine: {result['engine']}")
+            print(f"    language: {result['language'] or ''}")
+            print(f"    text: {result['text']}")
+    else:
+        print("ocr: none")
     if detail["subtitles"]:
         print("subtitles:")
         for subtitle in detail["subtitles"]:
@@ -1346,6 +1485,7 @@ EXPORT_QUERIES = {
     "streams": "SELECT * FROM recording_streams ORDER BY recording_id, stream_index",
     "subtitles": "SELECT * FROM subtitles ORDER BY recording_id, start_seconds",
     "subtitle-links": "SELECT * FROM capture_subtitle_links ORDER BY capture_id, subtitle_id",
+    "ocr": "SELECT * FROM capture_ocr_results ORDER BY capture_id, id",
     "sharex": "SELECT * FROM sharex_history ORDER BY id",
 }
 
@@ -1411,6 +1551,16 @@ def build_parser() -> argparse.ArgumentParser:
     captures = sub.add_parser("scan-captures")
     captures.add_argument("--captures-root")
     captures.set_defaults(func=cmd_scan_captures)
+
+    ocr = sub.add_parser("ocr-captures")
+    ocr.add_argument("--limit", type=int)
+    ocr.add_argument("--language", default="jpn+eng")
+    ocr.add_argument("--engine", default="tesseract")
+    ocr.add_argument("--timeout", type=int, default=60)
+    ocr.add_argument("--commit-every", type=int, default=10)
+    ocr.add_argument("--only-missing", action="store_true")
+    ocr.add_argument("--verbose", action="store_true")
+    ocr.set_defaults(func=cmd_ocr_captures)
 
     match = sub.add_parser("match")
     match.add_argument("--window-minutes", type=float, default=2)

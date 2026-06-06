@@ -57,6 +57,14 @@ def test_search_text_finds_recordings_subtitles_and_annotations(tmp_path: Path, 
         tags=["SNS候補", "名シーン"],
         note="共有したいカット",
     )
+    conn.execute(
+        """
+        INSERT INTO capture_ocr_results (
+            capture_id, engine, text, raw_text, language
+        ) VALUES (1, 'tesseract', 'EDカード 提供バック', 'ＥＤカード・提供バック', 'jpn+eng')
+        """
+    )
+    conn.commit()
     conn.close()
 
     main(["--db", str(db_path), "rebuild-search-index"])
@@ -64,6 +72,7 @@ def test_search_text_finds_recordings_subtitles_and_annotations(tmp_path: Path, 
     assert "recordings_indexed: 1" in rebuild_output
     assert "subtitles_indexed: 2" in rebuild_output
     assert "annotations_indexed: 1" in rebuild_output
+    assert "ocr_indexed: 1" in rebuild_output
 
     main(["--db", str(db_path), "search-text", "魔法少女"])
     title_output = capsys.readouterr().out
@@ -85,6 +94,11 @@ def test_search_text_finds_recordings_subtitles_and_annotations(tmp_path: Path, 
     assert "subtitle" in normalized_output
     assert "[MAGIA]" in normalized_output
     assert "[レコード]" in normalized_output
+
+    main(["--db", str(db_path), "search-text", "ＥＤカード"])
+    ocr_output = capsys.readouterr().out
+    assert "ocr" in ocr_output
+    assert "[EDカード]" in ocr_output
 
     main(["--db", str(db_path), "search-text", "SNS候補", "--format", "json"])
     tag_output = capsys.readouterr().out

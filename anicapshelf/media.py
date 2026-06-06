@@ -23,6 +23,13 @@ def ffmpeg_path() -> str:
     return path
 
 
+def tesseract_path() -> str:
+    path = shutil.which("tesseract")
+    if not path:
+        raise RuntimeError("tesseract was not found on PATH")
+    return path
+
+
 def probe_streams(path: str | Path, timeout: int = 30) -> list[dict]:
     try:
         proc = subprocess.run(
@@ -61,6 +68,27 @@ def has_arib_caption(path: str | Path, timeout: int = 30) -> bool:
 
 def stream_to_json(stream: dict) -> str:
     return json.dumps(stream, ensure_ascii=False, sort_keys=True)
+
+
+def run_tesseract_ocr(
+    path: str | Path,
+    *,
+    language: str = "jpn+eng",
+    timeout: int = 60,
+) -> str:
+    proc = subprocess.run(
+        [tesseract_path(), str(path), "stdout", "-l", language],
+        check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=timeout,
+    )
+    if proc.returncode != 0:
+        message = proc.stderr.strip() or f"tesseract failed with exit code {proc.returncode}"
+        raise RuntimeError(message)
+    return proc.stdout
 
 
 def extract_srt(path: str | Path, seconds: int | None = None, timeout: int = 180) -> str:
