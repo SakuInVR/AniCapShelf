@@ -147,6 +147,13 @@ python -m anicapshelf --db .\anicapshelf.db extract-subtitles --recording-id 1 -
 python -m anicapshelf --db .\anicapshelf.db extract-subtitles-batch --only-with-arib --only-missing --seconds 1800 --verbose
 ```
 
+録画ごとの字幕キューを時系列で確認します。`cue_index` は録画内の字幕順序です。
+
+```powershell
+python -m anicapshelf --db .\anicapshelf.db list-subtitles --recording-id 1
+python -m anicapshelf --db .\anicapshelf.db list-subtitles --recording-id 1 --format json
+```
+
 ShareX の履歴を取り込みます。
 
 ```powershell

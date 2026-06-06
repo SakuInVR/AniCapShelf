@@ -460,12 +460,21 @@ def extract_and_store_subtitles(
     conn.execute("DELETE FROM subtitles WHERE recording_id = ?", (recording_id,))
     conn.executemany(
         """
-        INSERT INTO subtitles (recording_id, start_seconds, end_seconds, text, raw_text, source)
-        VALUES (?, ?, ?, ?, ?, 'arib_caption')
+        INSERT INTO subtitles (
+            recording_id, cue_index, start_seconds, end_seconds, text, raw_text, source
+        )
+        VALUES (?, ?, ?, ?, ?, ?, 'arib_caption')
         """,
         [
-            (recording_id, item["start"], item["end"], item["text"], item["raw_text"])
-            for item in subtitles
+            (
+                recording_id,
+                index,
+                item["start"],
+                item["end"],
+                item["text"],
+                item["raw_text"],
+            )
+            for index, item in enumerate(subtitles, start=1)
         ],
     )
     return subtitles
@@ -545,6 +554,57 @@ def cmd_extract_subtitles_batch(args: argparse.Namespace) -> None:
     print(f"recordings skipped: {skipped}")
     print(f"recordings failed: {failed}")
     print(f"subtitles extracted: {extracted}")
+
+
+def cmd_list_subtitles(args: argparse.Namespace) -> None:
+    conn = connect(args.db)
+    init_db(conn)
+    recording = conn.execute(
+        "SELECT id, title, path FROM recordings WHERE id = ?", (args.recording_id,)
+    ).fetchone()
+    if recording is None:
+        conn.close()
+        raise SystemExit(f"recording not found: {args.recording_id}")
+    rows = conn.execute(
+        """
+        SELECT id, cue_index, start_seconds, end_seconds, text, raw_text, source
+        FROM subtitles
+        WHERE recording_id = ?
+        ORDER BY COALESCE(cue_index, id), start_seconds, id
+        LIMIT ?
+        """,
+        (args.recording_id, args.limit),
+    ).fetchall()
+    conn.close()
+    subtitles = [dict(row) for row in rows]
+    if args.format == "json":
+        print(
+            json.dumps(
+                {"recording": dict(recording), "subtitles": subtitles},
+                ensure_ascii=False,
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return
+    if not subtitles:
+        print("subtitles: none")
+        return
+    for subtitle in subtitles:
+        end_seconds = ""
+        if subtitle["end_seconds"] is not None:
+            end_seconds = f"{subtitle['end_seconds']:.3f}"
+        print(
+            "\t".join(
+                [
+                    str(subtitle["cue_index"] or ""),
+                    f"{subtitle['start_seconds']:.3f}",
+                    end_seconds,
+                    subtitle["source"],
+                    subtitle["text"],
+                ]
+            )
+        )
 
 
 def cmd_import_sharex(args: argparse.Namespace) -> None:
@@ -751,6 +811,7 @@ def fetch_capture_detail(conn: sqlite3.Connection, capture_id: int) -> dict | No
             SELECT
                 s.id AS subtitle_id,
                 s.recording_id,
+                s.cue_index,
                 s.start_seconds,
                 s.end_seconds,
                 s.text,
@@ -760,7 +821,7 @@ def fetch_capture_detail(conn: sqlite3.Connection, capture_id: int) -> dict | No
             FROM capture_subtitle_links l
             JOIN subtitles s ON s.id = l.subtitle_id
             WHERE l.capture_id = ?
-            ORDER BY ABS(l.offset_seconds), s.start_seconds
+            ORDER BY ABS(l.offset_seconds), COALESCE(s.cue_index, s.id), s.start_seconds
             """,
             (capture_id,),
         ).fetchall()
@@ -1132,6 +1193,7 @@ def cmd_near_capture(args: argparse.Namespace) -> None:
         print(
             "\t".join(
                 [
+                    f"#{subtitle['cue_index']}" if subtitle.get("cue_index") else "#",
                     f"{subtitle['start_seconds']:.3f}",
                     f"offset={subtitle['offset_seconds']:.3f}",
                     subtitle["source"],
@@ -1192,6 +1254,7 @@ def print_capture_detail(detail: dict) -> None:
                 "  - "
                 + "\t".join(
                     [
+                        f"#{subtitle['cue_index']}" if subtitle.get("cue_index") else "#",
                         f"{subtitle['start_seconds']:.3f}",
                         f"offset={subtitle['offset_seconds']:.3f}",
                         subtitle["source"],
@@ -1385,6 +1448,12 @@ def build_parser() -> argparse.ArgumentParser:
     extract_batch.add_argument("--only-missing", action="store_true")
     extract_batch.add_argument("--verbose", action="store_true")
     extract_batch.set_defaults(func=cmd_extract_subtitles_batch)
+
+    list_subtitles = sub.add_parser("list-subtitles")
+    list_subtitles.add_argument("--recording-id", type=int, required=True)
+    list_subtitles.add_argument("--limit", type=int, default=100)
+    list_subtitles.add_argument("--format", choices=["text", "json"], default="text")
+    list_subtitles.set_defaults(func=cmd_list_subtitles)
 
     sharex = sub.add_parser("import-sharex")
     sharex.add_argument("--history-db")

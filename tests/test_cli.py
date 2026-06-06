@@ -143,7 +143,7 @@ def test_extract_subtitles_batch_extracts_missing_caption_recordings(
     con = sqlite3.connect(db_path)
     rows = con.execute(
         """
-        SELECT r.title, s.text
+        SELECT r.title, s.cue_index, s.text
         FROM subtitles s
         JOIN recordings r ON r.id = s.recording_id
         """
@@ -153,7 +153,112 @@ def test_extract_subtitles_batch_extracts_missing_caption_recordings(
     assert "recordings selected: 1" in output
     assert "recordings processed: 1" in output
     assert "subtitles extracted: 1" in output
-    assert rows == [("字幕あり", "ほむらちゃん")]
+    assert rows == [("字幕あり", 1, "ほむらちゃん")]
+
+
+def test_list_subtitles_outputs_recording_subtitle_queue(tmp_path: Path, capsys):
+    import json
+    import sqlite3
+
+    db_path = tmp_path / "test.db"
+    recording_path = tmp_path / "recording.m2ts"
+    recording_path.write_bytes(b"recording")
+
+    from anicapshelf.db import connect, init_db
+
+    conn = connect(db_path)
+    init_db(conn)
+    conn.execute(
+        """
+        INSERT INTO recordings (
+            path, filename, extension, size_bytes, title
+        ) VALUES (?, 'recording.m2ts', '.m2ts', 1, '字幕キュー')
+        """,
+        (str(recording_path),),
+    )
+    recording_id = conn.execute("SELECT id FROM recordings").fetchone()["id"]
+    conn.executemany(
+        """
+        INSERT INTO subtitles (
+            recording_id, cue_index, start_seconds, end_seconds, text, raw_text, source
+        ) VALUES (?, ?, ?, ?, ?, ?, 'arib_caption')
+        """,
+        [
+            (recording_id, 1, 1.0, 2.0, "最初の字幕", "最初の字幕",),
+            (recording_id, 2, 3.0, 4.0, "次の字幕", "次の字幕",),
+        ],
+    )
+    conn.commit()
+    conn.close()
+
+    main(["--db", str(db_path), "list-subtitles", "--recording-id", str(recording_id)])
+    text_output = capsys.readouterr().out
+    assert "1\t1.000\t2.000\tarib_caption\t最初の字幕" in text_output
+    assert "2\t3.000\t4.000\tarib_caption\t次の字幕" in text_output
+
+    main(
+        [
+            "--db",
+            str(db_path),
+            "list-subtitles",
+            "--recording-id",
+            str(recording_id),
+            "--format",
+            "json",
+        ]
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["recording"]["title"] == "字幕キュー"
+    assert [row["cue_index"] for row in payload["subtitles"]] == [1, 2]
+
+    con = sqlite3.connect(db_path)
+    columns = [row[1] for row in con.execute("PRAGMA table_info(subtitles)").fetchall()]
+    con.close()
+    assert "cue_index" in columns
+
+
+def test_init_db_backfills_missing_subtitle_cue_indexes(tmp_path: Path):
+    import sqlite3
+
+    db_path = tmp_path / "test.db"
+    recording_path = tmp_path / "recording.m2ts"
+    recording_path.write_bytes(b"recording")
+
+    from anicapshelf.db import connect, init_db
+
+    conn = connect(db_path)
+    init_db(conn)
+    conn.execute(
+        """
+        INSERT INTO recordings (
+            path, filename, extension, size_bytes, title
+        ) VALUES (?, 'recording.m2ts', '.m2ts', 1, '既存字幕')
+        """,
+        (str(recording_path),),
+    )
+    recording_id = conn.execute("SELECT id FROM recordings").fetchone()["id"]
+    conn.executemany(
+        """
+        INSERT INTO subtitles (
+            recording_id, start_seconds, end_seconds, text, raw_text, source
+        ) VALUES (?, ?, ?, ?, ?, 'arib_caption')
+        """,
+        [
+            (recording_id, 20.0, 21.0, "二番目", "二番目"),
+            (recording_id, 10.0, 11.0, "一番目", "一番目"),
+        ],
+    )
+    conn.commit()
+    init_db(conn)
+    conn.close()
+
+    con = sqlite3.connect(db_path)
+    rows = con.execute(
+        "SELECT cue_index, text FROM subtitles ORDER BY cue_index"
+    ).fetchall()
+    con.close()
+
+    assert rows == [(1, "一番目"), (2, "二番目")]
 
 
 def test_extract_subtitles_batch_keeps_successes_when_later_recording_fails(

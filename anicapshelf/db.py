@@ -101,6 +101,7 @@ ON capture_annotations(source_app, external_program_id);
 CREATE TABLE IF NOT EXISTS subtitles (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     recording_id INTEGER NOT NULL,
+    cue_index INTEGER,
     start_seconds REAL NOT NULL,
     end_seconds REAL,
     text TEXT NOT NULL,
@@ -111,6 +112,7 @@ CREATE TABLE IF NOT EXISTS subtitles (
 );
 
 CREATE INDEX IF NOT EXISTS idx_subtitles_recording_time ON subtitles(recording_id, start_seconds);
+CREATE INDEX IF NOT EXISTS idx_subtitles_recording_cue ON subtitles(recording_id, cue_index);
 
 CREATE TABLE IF NOT EXISTS capture_subtitle_links (
     capture_id INTEGER NOT NULL,
@@ -169,6 +171,8 @@ def init_db(conn: sqlite3.Connection) -> None:
     ensure_column(conn, "capture_recording_matches", "confidence_reason", "TEXT")
     ensure_column(conn, "capture_annotations", "tags_json", "TEXT")
     ensure_column(conn, "capture_annotations", "note", "TEXT")
+    ensure_column(conn, "subtitles", "cue_index", "INTEGER")
+    backfill_subtitle_cue_indexes(conn)
     conn.commit()
 
 
@@ -182,3 +186,31 @@ def ensure_column(
         except sqlite3.OperationalError as exc:
             if "duplicate column name" not in str(exc):
                 raise
+
+
+def backfill_subtitle_cue_indexes(conn: sqlite3.Connection) -> None:
+    rows = conn.execute(
+        """
+        SELECT id
+        FROM subtitles
+        WHERE cue_index IS NULL
+        ORDER BY recording_id, start_seconds, id
+        """
+    ).fetchall()
+    if not rows:
+        return
+    ranked = conn.execute(
+        """
+        SELECT
+            id,
+            ROW_NUMBER() OVER (
+                PARTITION BY recording_id
+                ORDER BY start_seconds, id
+            ) AS cue_index
+        FROM subtitles
+        """
+    ).fetchall()
+    conn.executemany(
+        "UPDATE subtitles SET cue_index = ? WHERE id = ? AND cue_index IS NULL",
+        [(row["cue_index"], row["id"]) for row in ranked],
+    )
