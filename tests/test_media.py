@@ -1,6 +1,6 @@
 import json
 
-from anicapshelf.media import clean_caption_text, parse_srt, stream_to_json
+from anicapshelf.media import clean_caption_text, normalize_search_text, parse_srt, stream_to_json
 
 
 def test_clean_caption_text_removes_ruby_and_style_tags():
@@ -11,6 +11,10 @@ def test_clean_caption_text_removes_ruby_and_style_tags():
     )
 
     assert clean_caption_text(raw) == "(キュゥべえ)時間遡行者 暁美ほむら｡"
+
+
+def test_normalize_search_text_folds_width_and_punctuation():
+    assert normalize_search_text("ＭＡＧＩＡ・第５話　「約束」") == "MAGIA 第5話 約束"
 
 
 def test_parse_srt_drops_empty_cues_and_bogus_long_end_time():

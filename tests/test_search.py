@@ -34,6 +34,13 @@ def test_search_text_finds_recordings_subtitles_and_annotations(tmp_path: Path, 
         """,
         (recording_id,),
     )
+    conn.execute(
+        """
+        INSERT INTO subtitles (recording_id, start_seconds, end_seconds, text, raw_text, source)
+        VALUES (?, 120, 122, 'ＭＡＧＩＡ・レコード！', 'ＭＡＧＩＡ・レコード！', 'arib_caption')
+        """,
+        (recording_id,),
+    )
     save_annotated_capture(
         conn,
         image_bytes=b"capture image",
@@ -55,7 +62,7 @@ def test_search_text_finds_recordings_subtitles_and_annotations(tmp_path: Path, 
     main(["--db", str(db_path), "rebuild-search-index"])
     rebuild_output = capsys.readouterr().out
     assert "recordings_indexed: 1" in rebuild_output
-    assert "subtitles_indexed: 1" in rebuild_output
+    assert "subtitles_indexed: 2" in rebuild_output
     assert "annotations_indexed: 1" in rebuild_output
 
     main(["--db", str(db_path), "search-text", "魔法少女"])
@@ -72,6 +79,12 @@ def test_search_text_finds_recordings_subtitles_and_annotations(tmp_path: Path, 
     subtitle_output = capsys.readouterr().out
     assert "subtitle" in subtitle_output
     assert "暁美ほむら" in subtitle_output
+
+    main(["--db", str(db_path), "search-text", "ＭＡＧＩＡ・レコード！"])
+    normalized_output = capsys.readouterr().out
+    assert "subtitle" in normalized_output
+    assert "[MAGIA]" in normalized_output
+    assert "[レコード]" in normalized_output
 
     main(["--db", str(db_path), "search-text", "SNS候補", "--format", "json"])
     tag_output = capsys.readouterr().out

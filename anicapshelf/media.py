@@ -4,6 +4,7 @@ import json
 import re
 import shutil
 import subprocess
+import unicodedata
 from html import unescape
 from pathlib import Path
 
@@ -146,6 +147,8 @@ RUBY_FONT_RE = re.compile(
     r'<font\s+size="18">\s*(?:<font\s+color="[^"]+">)?[^<]*(?:</font>)?\s*</font>',
     re.IGNORECASE,
 )
+SEARCH_PUNCT_RE = re.compile(r"[、。・･「」『』【】（）()［］\[\]！？!?…‥:：;；,，.．]")
+WHITESPACE_RE = re.compile(r"\s+")
 
 
 def parse_srt_seconds(value: str) -> float:
@@ -161,6 +164,15 @@ def clean_caption_text(raw: str) -> str:
     text = text.replace("➡", "")
     lines = [line.strip() for line in text.splitlines()]
     return " ".join(line for line in lines if line).strip()
+
+
+def normalize_search_text(value: object) -> str:
+    if value is None:
+        return ""
+    text = unicodedata.normalize("NFKC", str(value))
+    text = SEARCH_PUNCT_RE.sub(" ", text)
+    text = WHITESPACE_RE.sub(" ", text)
+    return text.strip()
 
 
 def parse_srt(raw_srt: str) -> list[dict]:

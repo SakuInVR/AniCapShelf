@@ -88,6 +88,8 @@ python -m anicapshelf --db .\anicapshelf.db backfill-annotations --tag 後追い
 ```
 
 タイトル、字幕、タグ、メモを横断検索する検索インデックスを作ります。
+字幕の `raw_text` はデバッグ用に残し、検索インデックスでは全角英数、
+句読点、空白を正規化します。
 
 ```powershell
 python -m anicapshelf --db .\anicapshelf.db rebuild-search-index

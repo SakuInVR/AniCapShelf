@@ -16,6 +16,7 @@ from .media import (
     extract_srt,
     extract_srt_preview,
     has_arib_caption,
+    normalize_search_text,
     parse_srt,
     probe_streams,
     stream_to_json,
@@ -941,6 +942,14 @@ def rebuild_search_index(conn: sqlite3.Connection) -> dict[str, int]:
     return counts
 
 
+def build_search_text(*values: object) -> str:
+    return " ".join(
+        normalized
+        for normalized in (normalize_search_text(value) for value in values)
+        if normalized
+    )
+
+
 def index_recordings(conn: sqlite3.Connection) -> int:
     rows = conn.execute(
         """
@@ -950,19 +959,15 @@ def index_recordings(conn: sqlite3.Connection) -> int:
         """
     ).fetchall()
     for row in rows:
-        title = " ".join(
-            str(value)
-            for value in [
-                row["title"],
-                row["normalized_title"],
-                row["series_title"],
-                row["episode_token"],
-                row["episode_number"],
-                row["subtitle"],
-            ]
-            if value not in (None, "")
+        title = build_search_text(
+            row["title"],
+            row["normalized_title"],
+            row["series_title"],
+            row["episode_token"],
+            row["episode_number"],
+            row["subtitle"],
         )
-        body = " ".join(str(value) for value in [row["flags"], row["path"]] if value)
+        body = build_search_text(row["flags"], row["path"])
         conn.execute(
             """
             INSERT INTO search_index (
@@ -1000,7 +1005,7 @@ def index_subtitles(conn: sqlite3.Connection) -> int:
                 row["id"],
                 row["recording_id"],
                 row["title"] or "",
-                " ".join(value for value in [row["text"], row["raw_text"]] if value),
+                build_search_text(row["text"], row["raw_text"]),
                 row["source"] or "subtitles",
             ),
         )
@@ -1031,16 +1036,12 @@ def index_annotations(conn: sqlite3.Connection) -> int:
             metadata.get("episode_number"),
             str(metadata.get("subtitle") or ""),
         )
-        body = " ".join(
-            str(value)
-            for value in [
-                row["note"],
-                row["recording_file_path"],
-                row["playback_position_seconds"],
-                metadata.get("normalized_title"),
-                metadata.get("match_confidence_reason"),
-            ]
-            if value not in (None, "")
+        body = build_search_text(
+            row["note"],
+            row["recording_file_path"],
+            row["playback_position_seconds"],
+            metadata.get("normalized_title"),
+            metadata.get("match_confidence_reason"),
         )
         conn.execute(
             """
@@ -1053,7 +1054,7 @@ def index_annotations(conn: sqlite3.Connection) -> int:
                 row["capture_id"],
                 title,
                 body,
-                " ".join(str(tag) for tag in tags),
+                build_search_text(*tags),
                 row["source_app"] or "annotations",
             ),
         )
@@ -1065,7 +1066,10 @@ def cmd_search_text(args: argparse.Namespace) -> None:
     init_db(conn)
     entity_filter = getattr(args, "entity_type", None)
     where = "search_index MATCH ?"
-    params: list[object] = [args.query]
+    query = normalize_search_text(args.query)
+    if not query:
+        raise SystemExit("search query is empty after normalization")
+    params: list[object] = [query]
     if entity_filter:
         where += " AND entity_type = ?"
         params.append(entity_filter)
