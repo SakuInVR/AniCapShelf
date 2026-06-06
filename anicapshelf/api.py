@@ -21,11 +21,13 @@ class AniCapShelfServer(ThreadingHTTPServer):
         db_path: str,
         capture_output_root: str | Path,
         allow_origin: str | None = None,
+        api_token: str | None = None,
     ) -> None:
         super().__init__(server_address, handler_class)
         self.db_path = db_path
         self.capture_output_root = Path(capture_output_root)
         self.allow_origin = allow_origin
+        self.api_token = api_token
 
 
 class AniCapShelfRequestHandler(BaseHTTPRequestHandler):
@@ -49,6 +51,9 @@ class AniCapShelfRequestHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         if self.path != "/api/captures/annotated":
             self.write_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
+            return
+        if not self.is_authorized():
+            self.write_json(HTTPStatus.UNAUTHORIZED, {"error": "unauthorized"})
             return
         try:
             payload = self.read_multipart()
@@ -126,10 +131,18 @@ class AniCapShelfRequestHandler(BaseHTTPRequestHandler):
                 result[str(key)] = content.decode(charset)
         return result
 
+    def is_authorized(self) -> bool:
+        if not self.server.api_token:
+            return True
+        expected = f"Bearer {self.server.api_token}"
+        return self.headers.get("authorization") == expected
+
     def write_json(self, status: HTTPStatus, payload: dict[str, Any]) -> None:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.send_response(status.value)
         self.send_header("content-type", "application/json; charset=utf-8")
+        if status == HTTPStatus.UNAUTHORIZED:
+            self.send_header("www-authenticate", 'Bearer realm="AniCapShelf"')
         self.write_cors_headers()
         self.send_header("content-length", str(len(body)))
         self.end_headers()
@@ -141,7 +154,7 @@ class AniCapShelfRequestHandler(BaseHTTPRequestHandler):
         self.send_header("access-control-allow-origin", self.server.allow_origin)
         self.send_header("vary", "Origin")
         self.send_header("access-control-allow-methods", "GET, POST, OPTIONS")
-        self.send_header("access-control-allow-headers", "content-type")
+        self.send_header("access-control-allow-headers", "authorization, content-type")
 
     def log_message(self, format: str, *args: object) -> None:
         return
@@ -177,6 +190,7 @@ def run_server(
     db_path: str,
     capture_output_root: str | Path,
     allow_origin: str | None = None,
+    api_token: str | None = None,
 ) -> None:
     server = AniCapShelfServer(
         (host, port),
@@ -184,11 +198,14 @@ def run_server(
         db_path=db_path,
         capture_output_root=capture_output_root,
         allow_origin=allow_origin,
+        api_token=api_token,
     )
     print(f"AniCapShelf API listening on http://{host}:{port}")
     print(f"capture output root: {Path(capture_output_root)}")
     if allow_origin:
         print(f"allowed browser origin: {allow_origin}")
+    if api_token:
+        print("API token auth: enabled")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

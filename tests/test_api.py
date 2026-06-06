@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import threading
+import urllib.error
 import urllib.request
 import uuid
 from pathlib import Path
@@ -24,6 +25,14 @@ def test_annotated_capture_api_accepts_multipart_post(tmp_path: Path):
             server.server_address[1],
             expected_allow_origin="http://127.0.0.1:7000",
         )
+        options_request = urllib.request.Request(
+            f"http://127.0.0.1:{server.server_address[1]}/api/captures/annotated",
+            method="OPTIONS",
+        )
+        with urllib.request.urlopen(options_request, timeout=5) as options_response:
+            assert "authorization" in options_response.headers[
+                "access-control-allow-headers"
+            ]
     finally:
         server.shutdown()
         server.server_close()
@@ -57,12 +66,40 @@ def test_annotated_capture_api_accepts_quick_tags(tmp_path: Path):
     assert response["capture_id"] == 1
 
 
+def test_annotated_capture_api_requires_bearer_token_when_configured(tmp_path: Path):
+    server = AniCapShelfServer(
+        ("127.0.0.1", 0),
+        AniCapShelfRequestHandler,
+        db_path=str(tmp_path / "api.db"),
+        capture_output_root=tmp_path / "captures",
+        api_token="secret-token",
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        try:
+            post_annotated_capture(server.server_address[1])
+        except urllib.error.HTTPError as exc:
+            assert exc.code == 401
+            assert exc.headers["www-authenticate"] == 'Bearer realm="AniCapShelf"'
+        else:
+            raise AssertionError("request without token should be rejected")
+        response = post_annotated_capture(server.server_address[1], api_token="secret-token")
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+    assert response["capture_id"] == 1
+
+
 def post_annotated_capture(
     port: int,
     *,
     tag_field: str = "tags",
     tag_value: str | None = None,
     expected_allow_origin: str | None = None,
+    api_token: str | None = None,
 ) -> dict:
     boundary = "----AniCapShelf" + uuid.uuid4().hex
     metadata = json.dumps(
@@ -78,10 +115,13 @@ def post_annotated_capture(
     add_field(parts, boundary, "metadata", metadata)
     add_field(parts, boundary, tag_field, tag_value or json.dumps(["SNS候補"], ensure_ascii=False))
     body = b"".join(parts) + f"--{boundary}--\r\n".encode("utf-8")
+    headers = {"Content-Type": f"multipart/form-data; boundary={boundary}"}
+    if api_token:
+        headers["Authorization"] = f"Bearer {api_token}"
     request = urllib.request.Request(
         f"http://127.0.0.1:{port}/api/captures/annotated",
         data=body,
-        headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+        headers=headers,
         method="POST",
     )
     with urllib.request.urlopen(request, timeout=5) as response:

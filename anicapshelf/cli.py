@@ -1523,12 +1523,14 @@ def cmd_serve_api(args: argparse.Namespace) -> None:
     capture_output_root = args.capture_output_root or config.captures_root
     if not capture_output_root:
         raise SystemExit("--capture-output-root または設定ファイルの roots.captures が必要です")
+    api_token = args.api_token or os.environ.get("ANICAPSHELF_API_TOKEN")
     run_server(
         host=args.host,
         port=args.port,
         db_path=args.db,
         capture_output_root=capture_output_root,
         allow_origin=args.allow_origin,
+        api_token=api_token,
     )
 
 
@@ -1682,6 +1684,10 @@ def build_parser() -> argparse.ArgumentParser:
     api.add_argument(
         "--allow-origin",
         help="ブラウザ連携を許可するKonomiTVのorigin。例: http://127.0.0.1:7000",
+    )
+    api.add_argument(
+        "--api-token",
+        help="POST APIを保護するBearerトークン。未指定時は ANICAPSHELF_API_TOKEN も参照します。",
     )
     api.set_defaults(func=cmd_serve_api)
 

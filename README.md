@@ -111,11 +111,16 @@ python -m anicapshelf --db .\anicapshelf.db search-text アイキャッチ
 
 KonomiTV などの外部ツールから、画像とメタデータを同時保存するローカルAPIを
 起動します。`--capture-output-root` を省略した場合は、設定ファイルの
-`roots.captures` を保存先として使います。
+`roots.captures` を保存先として使います。APIスタックは、依存を増やさない
+標準ライブラリの `http.server` ベースです。
 
 ```powershell
 python -m anicapshelf --db .\anicapshelf.db serve-api --host 127.0.0.1 --port 8765 --allow-origin http://127.0.0.1:7000
 ```
+
+`--api-token` または `ANICAPSHELF_API_TOKEN` を設定すると、POST API は
+`Authorization: Bearer <token>` を要求します。スマホやKonomiTVから使う場合も、
+ローカルネットワークへ公開するならトークンを設定してください。
 
 最小APIは `POST /api/captures/annotated` です。`multipart/form-data` で
 `image` と `metadata` JSON文字列を送ると、画像を保存し、
