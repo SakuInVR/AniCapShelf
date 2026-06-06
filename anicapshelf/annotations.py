@@ -99,6 +99,7 @@ def save_annotated_capture(
             metadata_json,
         ),
     )
+    attach_nearby_subtitles(conn, capture_id=capture_id, metadata=metadata)
     conn.commit()
     return AnnotationResult(
         capture_id=capture_id,
@@ -164,6 +165,54 @@ def optional_float(value: object) -> float | None:
 def safe_filename(value: str) -> str:
     safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", value.strip())
     return safe.strip("._") or "unknown"
+
+
+def attach_nearby_subtitles(
+    conn: sqlite3.Connection,
+    *,
+    capture_id: int,
+    metadata: dict,
+    window_seconds: float = 10.0,
+) -> int:
+    recording_file_path = optional_text(metadata.get("recording_file_path"))
+    playback_position = optional_float(metadata.get("playback_position_seconds"))
+    if recording_file_path is None or playback_position is None:
+        return 0
+    recording = conn.execute(
+        "SELECT id FROM recordings WHERE path = ?",
+        (recording_file_path,),
+    ).fetchone()
+    if recording is None:
+        return 0
+    rows = conn.execute(
+        """
+        SELECT id, start_seconds
+        FROM subtitles
+        WHERE recording_id = ?
+          AND start_seconds BETWEEN ? AND ?
+        ORDER BY ABS(start_seconds - ?), start_seconds
+        """,
+        (
+            recording["id"],
+            playback_position - window_seconds,
+            playback_position + window_seconds,
+            playback_position,
+        ),
+    ).fetchall()
+    for row in rows:
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO capture_subtitle_links (
+                capture_id, subtitle_id, offset_seconds, method
+            ) VALUES (?, ?, ?, 'annotation-time-window')
+            """,
+            (
+                capture_id,
+                row["id"],
+                float(row["start_seconds"]) - playback_position,
+            ),
+        )
+    return len(rows)
 
 
 def iso(dt: datetime | None) -> str | None:

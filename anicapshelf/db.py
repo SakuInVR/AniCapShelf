@@ -111,6 +111,20 @@ CREATE TABLE IF NOT EXISTS subtitles (
 
 CREATE INDEX IF NOT EXISTS idx_subtitles_recording_time ON subtitles(recording_id, start_seconds);
 
+CREATE TABLE IF NOT EXISTS capture_subtitle_links (
+    capture_id INTEGER NOT NULL,
+    subtitle_id INTEGER NOT NULL,
+    offset_seconds REAL NOT NULL,
+    method TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (capture_id, subtitle_id, method),
+    FOREIGN KEY (capture_id) REFERENCES captures(id) ON DELETE CASCADE,
+    FOREIGN KEY (subtitle_id) REFERENCES subtitles(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_capture_subtitle_links_capture_id
+ON capture_subtitle_links(capture_id);
+
 CREATE TABLE IF NOT EXISTS sharex_history (
     id INTEGER PRIMARY KEY,
     file_path TEXT,

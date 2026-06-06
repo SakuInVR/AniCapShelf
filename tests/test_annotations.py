@@ -157,3 +157,56 @@ def test_show_capture_json_outputs_decoded_metadata(tmp_path: Path, capsys):
     assert payload["capture"]["id"] == result.capture_id
     assert payload["annotations"][0]["metadata"]["title"] == "作品名"
     assert payload["annotations"][0]["tags"] == ["SNS候補"]
+
+
+def test_annotated_capture_links_nearby_subtitles(tmp_path: Path, capsys):
+    db_path = tmp_path / "test.db"
+    output_root = tmp_path / "captures"
+    recording_path = tmp_path / "records" / "anime.ts"
+    recording_path.parent.mkdir()
+    recording_path.write_bytes(b"recording")
+    conn = connect(db_path)
+    init_db(conn)
+    conn.execute(
+        """
+        INSERT INTO recordings (
+            path, filename, extension, size_bytes, start_at, end_at, duration_seconds
+        ) VALUES (?, ?, '.ts', 9, '2026-06-06T01:00:00', '2026-06-06T01:30:00', 1800)
+        """,
+        (str(recording_path), recording_path.name),
+    )
+    recording_id = conn.execute("SELECT id FROM recordings").fetchone()["id"]
+    conn.executemany(
+        """
+        INSERT INTO subtitles (recording_id, start_seconds, end_seconds, text, raw_text, source)
+        VALUES (?, ?, ?, ?, ?, 'arib_caption')
+        """,
+        [
+            (recording_id, 90.0, 92.0, "少し前のセリフ", "少し前のセリフ"),
+            (recording_id, 100.0, 102.0, "ちょうど近いセリフ", "ちょうど近いセリフ"),
+            (recording_id, 120.0, 122.0, "遠いセリフ", "遠いセリフ"),
+        ],
+    )
+    conn.commit()
+    result = save_annotated_capture(
+        conn,
+        image_bytes=b"capture image",
+        original_filename="capture.jpg",
+        output_root=output_root,
+        metadata={
+            "source_app": "KonomiTV",
+            "recording_file_path": str(recording_path),
+            "playback_position_seconds": 99.0,
+        },
+    )
+    linked = conn.execute("SELECT COUNT(*) FROM capture_subtitle_links").fetchone()[0]
+    conn.close()
+
+    assert linked == 2
+    main(["--db", str(db_path), "show-capture", str(result.capture_id)])
+    output = capsys.readouterr().out
+
+    assert "subtitles:" in output
+    assert "ちょうど近いセリフ" in output
+    assert "少し前のセリフ" in output
+    assert "遠いセリフ" not in output

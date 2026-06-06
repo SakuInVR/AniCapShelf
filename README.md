@@ -68,7 +68,7 @@ python -m anicapshelf --db .\anicapshelf.db export annotations --format jsonl
 ```
 
 キャプチャ1件の詳細を確認します。KonomiTV 連携で保存した元URL、
-動画内時刻、録画パス、タグもここで見られます。
+動画内時刻、録画パス、タグ、紐づいた前後字幕もここで見られます。
 
 ```powershell
 python -m anicapshelf --db .\anicapshelf.db show-capture 1
@@ -86,6 +86,8 @@ python -m anicapshelf --db .\anicapshelf.db serve-api --host 127.0.0.1 --port 87
 最小APIは `POST /api/captures/annotated` です。`multipart/form-data` で
 `image` と `metadata` JSON文字列を送ると、画像を保存し、
 `capture_annotations` に録画ID、録画パス、再生位置などを残します。
+同じ録画パスの字幕がDBにあり、再生位置の前後に字幕が見つかった場合は、
+`capture_subtitle_links` に自動で紐づけます。
 KonomiTV 側へ差し込む最小クライアントは
 [integrations/konomitv](integrations/konomitv) に置いています。
 

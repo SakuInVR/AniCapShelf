@@ -444,6 +444,7 @@ def cmd_report(args: argparse.Namespace) -> None:
         "captures_matched": "SELECT COUNT(DISTINCT capture_id) FROM capture_recording_matches",
         "match_candidates": "SELECT COUNT(*) FROM capture_recording_matches",
         "capture_annotations": "SELECT COUNT(*) FROM capture_annotations",
+        "capture_subtitle_links": "SELECT COUNT(*) FROM capture_subtitle_links",
         "subtitles": "SELECT COUNT(*) FROM subtitles",
         "sharex_history": "SELECT COUNT(*) FROM sharex_history",
     }
@@ -587,10 +588,32 @@ def fetch_capture_detail(conn: sqlite3.Connection, capture_id: int) -> dict | No
             (capture_id,),
         ).fetchall()
     ]
+    subtitles = [
+        dict(row)
+        for row in conn.execute(
+            """
+            SELECT
+                s.id AS subtitle_id,
+                s.recording_id,
+                s.start_seconds,
+                s.end_seconds,
+                s.text,
+                s.source,
+                l.offset_seconds,
+                l.method
+            FROM capture_subtitle_links l
+            JOIN subtitles s ON s.id = l.subtitle_id
+            WHERE l.capture_id = ?
+            ORDER BY ABS(l.offset_seconds), s.start_seconds
+            """,
+            (capture_id,),
+        ).fetchall()
+    ]
     return {
         "capture": dict(capture),
         "annotations": [decode_annotation_json(row) for row in annotations],
         "matches": matches,
+        "subtitles": subtitles,
     }
 
 
@@ -652,6 +675,22 @@ def print_capture_detail(detail: dict) -> None:
                 print(f"    title: {format_title(title, episode, subtitle)}")
     else:
         print("annotations: none")
+    if detail["subtitles"]:
+        print("subtitles:")
+        for subtitle in detail["subtitles"]:
+            print(
+                "  - "
+                + "\t".join(
+                    [
+                        f"{subtitle['start_seconds']:.3f}",
+                        f"offset={subtitle['offset_seconds']:.3f}",
+                        subtitle["source"],
+                        subtitle["text"],
+                    ]
+                )
+            )
+    else:
+        print("subtitles: none")
     if detail["matches"]:
         print("matches:")
         for match in detail["matches"]:
@@ -723,6 +762,7 @@ EXPORT_QUERIES = {
     """,
     "streams": "SELECT * FROM recording_streams ORDER BY recording_id, stream_index",
     "subtitles": "SELECT * FROM subtitles ORDER BY recording_id, start_seconds",
+    "subtitle-links": "SELECT * FROM capture_subtitle_links ORDER BY capture_id, subtitle_id",
     "sharex": "SELECT * FROM sharex_history ORDER BY id",
 }
 
