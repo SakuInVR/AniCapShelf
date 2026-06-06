@@ -149,6 +149,10 @@ def test_show_capture_outputs_annotation_source(tmp_path: Path, capsys):
     assert "program_id: 123" in output
     assert "playback_position_seconds: 12.5" in output
     assert "source_url: http://konomitv.local/videos/watch/123" in output
+    assert "source_jump:" in output
+    assert "open_url: http://konomitv.local/videos/watch/123" in output
+    assert "timecode: 0:12" in output
+    assert "open_hint: http://konomitv.local/videos/watch/123 を開いて 0:12 に移動" in output
     assert "tags: SNS候補" in output
     assert "title: 作品名 第5話 サブタイトル" in output
 
@@ -180,6 +184,8 @@ def test_show_capture_json_outputs_decoded_metadata(tmp_path: Path, capsys):
     assert payload["capture"]["id"] == result.capture_id
     assert payload["annotations"][0]["metadata"]["title"] == "作品名"
     assert payload["annotations"][0]["tags"] == ["SNS候補"]
+    assert payload["source_jump"]["playback_position_seconds"] == 12.5
+    assert payload["source_jump"]["timecode"] == "0:12"
 
 
 def test_annotated_capture_links_nearby_subtitles(tmp_path: Path, capsys):

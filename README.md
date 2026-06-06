@@ -69,6 +69,8 @@ python -m anicapshelf --db .\anicapshelf.db export annotations --format jsonl
 
 キャプチャ1件の詳細を確認します。KonomiTV 連携で保存した元URL、
 動画内時刻、録画パス、タグ、紐づいた前後字幕もここで見られます。
+`source_jump` には、元URL、動画内秒数、タイムコード、開くときのヒントを
+まとめて表示します。
 
 ```powershell
 python -m anicapshelf --db .\anicapshelf.db show-capture 1

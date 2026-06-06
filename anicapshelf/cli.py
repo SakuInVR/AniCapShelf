@@ -612,6 +612,7 @@ def fetch_capture_detail(conn: sqlite3.Connection, capture_id: int) -> dict | No
     return {
         "capture": dict(capture),
         "annotations": [decode_annotation_json(row) for row in annotations],
+        "source_jump": build_source_jump(annotations),
         "matches": matches,
         "subtitles": subtitles,
     }
@@ -631,6 +632,46 @@ def json_loads_or_default(value: str | None, default):
         return json.loads(value)
     except json.JSONDecodeError:
         return default
+
+
+def build_source_jump(annotation_rows: list[dict]) -> dict | None:
+    for row in annotation_rows:
+        playback_position = row.get("playback_position_seconds")
+        source_url = row.get("source_url")
+        recording_file_path = row.get("recording_file_path")
+        if playback_position is None and not source_url and not recording_file_path:
+            continue
+        seconds = float(playback_position) if playback_position is not None else None
+        return {
+            "source_app": row.get("source_app"),
+            "url": source_url,
+            "recording_file_path": recording_file_path,
+            "playback_position_seconds": seconds,
+            "timecode": format_timecode(seconds),
+            "open_hint": build_open_hint(source_url, seconds),
+        }
+    return None
+
+
+def format_timecode(seconds: float | None) -> str | None:
+    if seconds is None:
+        return None
+    total_seconds = max(0, int(seconds))
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, secs = divmod(remainder, 60)
+    if hours:
+        return f"{hours:d}:{minutes:02d}:{secs:02d}"
+    return f"{minutes:d}:{secs:02d}"
+
+
+def build_open_hint(source_url: str | None, seconds: float | None) -> str | None:
+    if source_url and seconds is not None:
+        return f"{source_url} を開いて {format_timecode(seconds)} に移動"
+    if source_url:
+        return f"{source_url} を開く"
+    if seconds is not None:
+        return f"{format_timecode(seconds)} に移動"
+    return None
 
 
 def cmd_show_capture(args: argparse.Namespace) -> None:
@@ -655,6 +696,21 @@ def print_capture_detail(detail: dict) -> None:
     print(f"source_hint: {capture['source_hint'] or ''}")
     if capture["width"] and capture["height"]:
         print(f"size: {capture['width']}x{capture['height']}")
+    if detail["source_jump"]:
+        source_jump = detail["source_jump"]
+        print("source_jump:")
+        print(f"  app: {source_jump['source_app'] or ''}")
+        print(f"  open_url: {source_jump['url'] or ''}")
+        print(f"  timecode: {source_jump['timecode'] or ''}")
+        playback_position = source_jump["playback_position_seconds"]
+        print(
+            "  playback_position_seconds: "
+            + (str(playback_position) if playback_position is not None else "")
+        )
+        print(f"  recording_file_path: {source_jump['recording_file_path'] or ''}")
+        print(f"  open_hint: {source_jump['open_hint'] or ''}")
+    else:
+        print("source_jump: none")
     if detail["annotations"]:
         print("annotations:")
         for annotation in detail["annotations"]:
