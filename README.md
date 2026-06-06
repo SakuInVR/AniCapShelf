@@ -87,6 +87,16 @@ python -m anicapshelf --db .\anicapshelf.db show-capture 1 --format json
 python -m anicapshelf --db .\anicapshelf.db backfill-annotations --tag 後追い
 ```
 
+タイトル、字幕、タグ、メモを横断検索する検索インデックスを作ります。
+
+```powershell
+python -m anicapshelf --db .\anicapshelf.db rebuild-search-index
+python -m anicapshelf --db .\anicapshelf.db search-text 魔法少女
+python -m anicapshelf --db .\anicapshelf.db search-title 魔法少女
+python -m anicapshelf --db .\anicapshelf.db near-capture 1
+python -m anicapshelf --db .\anicapshelf.db search-text SNS候補 --format json
+```
+
 KonomiTV などの外部ツールから、画像とメタデータを同時保存するローカルAPIを
 起動します。`--capture-output-root` を省略した場合は、設定ファイルの
 `roots.captures` を保存先として使います。

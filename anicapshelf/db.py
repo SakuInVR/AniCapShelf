@@ -137,6 +137,18 @@ CREATE TABLE IF NOT EXISTS sharex_history (
     tags TEXT,
     imported_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE VIRTUAL TABLE IF NOT EXISTS search_index USING fts5(
+    entity_type,
+    entity_id UNINDEXED,
+    capture_id UNINDEXED,
+    recording_id UNINDEXED,
+    title,
+    body,
+    tags,
+    source,
+    tokenize = 'unicode61'
+);
 """
 
 

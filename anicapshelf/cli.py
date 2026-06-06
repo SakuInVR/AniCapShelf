@@ -823,6 +823,222 @@ def cmd_backfill_annotations(args: argparse.Namespace) -> None:
     print(f"subtitle links created: {subtitle_links}")
 
 
+def cmd_rebuild_search_index(args: argparse.Namespace) -> None:
+    conn = connect(args.db)
+    init_db(conn)
+    counts = rebuild_search_index(conn)
+    conn.close()
+    for label, count in counts.items():
+        print(f"{label}: {count}")
+
+
+def rebuild_search_index(conn: sqlite3.Connection) -> dict[str, int]:
+    conn.execute("DELETE FROM search_index")
+    counts = {
+        "recordings_indexed": index_recordings(conn),
+        "subtitles_indexed": index_subtitles(conn),
+        "annotations_indexed": index_annotations(conn),
+    }
+    conn.commit()
+    return counts
+
+
+def index_recordings(conn: sqlite3.Connection) -> int:
+    rows = conn.execute(
+        """
+        SELECT id, title, normalized_title, series_title, episode_token, episode_number, subtitle, flags, path
+        FROM recordings
+        ORDER BY id
+        """
+    ).fetchall()
+    for row in rows:
+        title = " ".join(
+            str(value)
+            for value in [
+                row["title"],
+                row["normalized_title"],
+                row["series_title"],
+                row["episode_token"],
+                row["episode_number"],
+                row["subtitle"],
+            ]
+            if value not in (None, "")
+        )
+        body = " ".join(str(value) for value in [row["flags"], row["path"]] if value)
+        conn.execute(
+            """
+            INSERT INTO search_index (
+                entity_type, entity_id, capture_id, recording_id, title, body, tags, source
+            ) VALUES ('recording', ?, NULL, ?, ?, ?, '', 'recordings')
+            """,
+            (row["id"], row["id"], title, body),
+        )
+    return len(rows)
+
+
+def index_subtitles(conn: sqlite3.Connection) -> int:
+    rows = conn.execute(
+        """
+        SELECT
+            s.id,
+            s.recording_id,
+            s.text,
+            s.raw_text,
+            s.source,
+            r.title
+        FROM subtitles s
+        JOIN recordings r ON r.id = s.recording_id
+        ORDER BY s.id
+        """
+    ).fetchall()
+    for row in rows:
+        conn.execute(
+            """
+            INSERT INTO search_index (
+                entity_type, entity_id, capture_id, recording_id, title, body, tags, source
+            ) VALUES ('subtitle', ?, NULL, ?, ?, ?, '', ?)
+            """,
+            (
+                row["id"],
+                row["recording_id"],
+                row["title"] or "",
+                " ".join(value for value in [row["text"], row["raw_text"]] if value),
+                row["source"] or "subtitles",
+            ),
+        )
+    return len(rows)
+
+
+def index_annotations(conn: sqlite3.Connection) -> int:
+    rows = conn.execute(
+        """
+        SELECT
+            a.id,
+            a.capture_id,
+            a.recording_file_path,
+            a.playback_position_seconds,
+            a.tags_json,
+            a.note,
+            a.metadata_json,
+            a.source_app
+        FROM capture_annotations a
+        ORDER BY a.id
+        """
+    ).fetchall()
+    for row in rows:
+        metadata = json_loads_or_default(row["metadata_json"], {})
+        tags = json_loads_or_default(row["tags_json"], [])
+        title = format_title(
+            str(metadata.get("title") or metadata.get("series_title") or ""),
+            metadata.get("episode_number"),
+            str(metadata.get("subtitle") or ""),
+        )
+        body = " ".join(
+            str(value)
+            for value in [
+                row["note"],
+                row["recording_file_path"],
+                row["playback_position_seconds"],
+                metadata.get("normalized_title"),
+                metadata.get("match_confidence_reason"),
+            ]
+            if value not in (None, "")
+        )
+        conn.execute(
+            """
+            INSERT INTO search_index (
+                entity_type, entity_id, capture_id, recording_id, title, body, tags, source
+            ) VALUES ('annotation', ?, ?, NULL, ?, ?, ?, ?)
+            """,
+            (
+                row["id"],
+                row["capture_id"],
+                title,
+                body,
+                " ".join(str(tag) for tag in tags),
+                row["source_app"] or "annotations",
+            ),
+        )
+    return len(rows)
+
+
+def cmd_search_text(args: argparse.Namespace) -> None:
+    conn = connect(args.db)
+    init_db(conn)
+    entity_filter = getattr(args, "entity_type", None)
+    where = "search_index MATCH ?"
+    params: list[object] = [args.query]
+    if entity_filter:
+        where += " AND entity_type = ?"
+        params.append(entity_filter)
+    params.append(args.limit)
+    rows = conn.execute(
+        f"""
+        SELECT
+            entity_type,
+            entity_id,
+            capture_id,
+            recording_id,
+            title,
+            snippet(search_index, 5, '[', ']', '...', 12) AS snippet,
+            source
+        FROM search_index
+        WHERE {where}
+        ORDER BY rank
+        LIMIT ?
+        """,
+        params,
+    ).fetchall()
+    conn.close()
+    if args.format == "json":
+        print(json.dumps([dict(row) for row in rows], ensure_ascii=False, indent=2, sort_keys=True))
+        return
+    if not rows:
+        print("検索結果はありません")
+        return
+    for row in rows:
+        print(
+            "\t".join(
+                [
+                    row["entity_type"],
+                    str(row["entity_id"]),
+                    str(row["capture_id"] or ""),
+                    str(row["recording_id"] or ""),
+                    row["title"] or "",
+                    row["snippet"] or "",
+                    row["source"] or "",
+                ]
+            )
+        )
+
+
+def cmd_near_capture(args: argparse.Namespace) -> None:
+    conn = connect(args.db)
+    init_db(conn)
+    detail = fetch_capture_detail(conn, args.capture_id)
+    conn.close()
+    if detail is None:
+        raise SystemExit(f"capture not found: {args.capture_id}")
+    subtitles = detail["subtitles"]
+    if args.format == "json":
+        print(json.dumps(subtitles, ensure_ascii=False, indent=2, sort_keys=True))
+        return
+    if not subtitles:
+        print("近傍字幕はありません")
+        return
+    for subtitle in subtitles[: args.limit]:
+        print(
+            "\t".join(
+                [
+                    f"{subtitle['start_seconds']:.3f}",
+                    f"offset={subtitle['offset_seconds']:.3f}",
+                    subtitle["source"],
+                    subtitle["text"],
+                ]
+            )
+        )
+
+
 def print_capture_detail(detail: dict) -> None:
     capture = detail["capture"]
     print(f"capture_id: {capture['id']}")
@@ -1084,6 +1300,27 @@ def build_parser() -> argparse.ArgumentParser:
     backfill.add_argument("--note")
     backfill.add_argument("--verbose", action="store_true")
     backfill.set_defaults(func=cmd_backfill_annotations)
+
+    rebuild_search = sub.add_parser("rebuild-search-index")
+    rebuild_search.set_defaults(func=cmd_rebuild_search_index)
+
+    search_text = sub.add_parser("search-text")
+    search_text.add_argument("query")
+    search_text.add_argument("--limit", type=int, default=20)
+    search_text.add_argument("--format", choices=["text", "json"], default="text")
+    search_text.set_defaults(func=cmd_search_text)
+
+    search_title = sub.add_parser("search-title")
+    search_title.add_argument("query")
+    search_title.add_argument("--limit", type=int, default=20)
+    search_title.add_argument("--format", choices=["text", "json"], default="text")
+    search_title.set_defaults(func=cmd_search_text, entity_type="recording")
+
+    near_capture = sub.add_parser("near-capture")
+    near_capture.add_argument("capture_id", type=int)
+    near_capture.add_argument("--limit", type=int, default=20)
+    near_capture.add_argument("--format", choices=["text", "json"], default="text")
+    near_capture.set_defaults(func=cmd_near_capture)
 
     export = sub.add_parser("export")
     export.add_argument(
