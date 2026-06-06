@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import mimetypes
 from email.parser import BytesParser
 from email.policy import default
 from http import HTTPStatus
@@ -39,8 +40,19 @@ class AniCapShelfRequestHandler(BaseHTTPRequestHandler):
         if parsed.path == "/health":
             self.write_json(HTTPStatus.OK, {"ok": True, "app": "AniCapShelf"})
             return
+        if parsed.path in {"/", "/app.js", "/styles.css"}:
+            self.write_static(parsed.path)
+            return
         if parsed.path.startswith("/api/") and not self.is_authorized():
             self.write_json(HTTPStatus.UNAUTHORIZED, {"error": "unauthorized"})
+            return
+        if parsed.path.startswith("/api/captures/") and parsed.path.endswith("/image"):
+            try:
+                capture_id = parse_capture_image_path(parsed.path)
+            except BadRequest as exc:
+                self.write_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+                return
+            self.write_capture_image(capture_id)
             return
         try:
             payload = self.handle_api_get(parsed.path, parse_qs(parsed.query))
@@ -286,6 +298,18 @@ class AniCapShelfRequestHandler(BaseHTTPRequestHandler):
                     (capture_id,),
                 ).fetchall()
             ]
+            sharex_history = [
+                dict(row)
+                for row in conn.execute(
+                    """
+                    SELECT *
+                    FROM sharex_history
+                    WHERE file_path = ?
+                    ORDER BY imported_at DESC
+                    """,
+                    (capture["path"],),
+                ).fetchall()
+            ]
             return {
                 "capture": dict(capture),
                 "annotations": annotations,
@@ -293,6 +317,7 @@ class AniCapShelfRequestHandler(BaseHTTPRequestHandler):
                 "subtitles": subtitles,
                 "ocr_results": ocr_results,
                 "collections": collections,
+                "sharex_history": sharex_history,
             }
         finally:
             conn.close()
@@ -432,6 +457,46 @@ class AniCapShelfRequestHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def write_static(self, path: str) -> None:
+        filename = "index.html" if path == "/" else path.removeprefix("/")
+        static_path = Path(__file__).with_name("static") / filename
+        if not static_path.exists():
+            self.write_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
+            return
+        content = static_path.read_bytes()
+        content_type = mimetypes.guess_type(static_path.name)[0] or "application/octet-stream"
+        if static_path.suffix == ".js":
+            content_type = "text/javascript"
+        self.send_response(HTTPStatus.OK.value)
+        self.send_header("content-type", f"{content_type}; charset=utf-8")
+        self.write_cors_headers()
+        self.send_header("content-length", str(len(content)))
+        self.end_headers()
+        self.wfile.write(content)
+
+    def write_capture_image(self, capture_id: int) -> None:
+        conn = connect(self.server.db_path)
+        try:
+            init_db(conn)
+            row = conn.execute("SELECT path FROM captures WHERE id = ?", (capture_id,)).fetchone()
+        finally:
+            conn.close()
+        if row is None:
+            self.write_json(HTTPStatus.NOT_FOUND, {"error": "capture not found"})
+            return
+        image_path = Path(row["path"])
+        if not image_path.exists():
+            self.write_json(HTTPStatus.NOT_FOUND, {"error": "capture image not found"})
+            return
+        content = image_path.read_bytes()
+        content_type = mimetypes.guess_type(image_path.name)[0] or "application/octet-stream"
+        self.send_response(HTTPStatus.OK.value)
+        self.send_header("content-type", content_type)
+        self.write_cors_headers()
+        self.send_header("content-length", str(len(content)))
+        self.end_headers()
+        self.wfile.write(content)
+
     def write_cors_headers(self) -> None:
         if not self.server.allow_origin:
             return
@@ -469,6 +534,17 @@ def parse_optional_tags(value: str | UploadedFile | None) -> list[str]:
 
 def parse_path_int(path: str, prefix: str) -> int:
     value = path.removeprefix(prefix).strip("/")
+    if not value.isdigit():
+        raise BadRequest("invalid numeric id")
+    return int(value)
+
+
+def parse_capture_image_path(path: str) -> int:
+    prefix = "/api/captures/"
+    suffix = "/image"
+    if not path.startswith(prefix) or not path.endswith(suffix):
+        raise BadRequest("invalid capture image path")
+    value = path[len(prefix) : -len(suffix)].strip("/")
     if not value.isdigit():
         raise BadRequest("invalid numeric id")
     return int(value)

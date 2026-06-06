@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AniCapShelf</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <h1>AniCapShelf</h1>
+        <p id="summary">読み込み中</p>
+      </div>
+      <label class="token-field">
+        APIトークン
+        <input id="api-token" type="password" autocomplete="off" />
+      </label>
+    </header>
+    <main class="layout">
+      <aside class="sidebar">
+        <section>
+          <h2>タグ</h2>
+          <div id="tags" class="pill-list"></div>
+        </section>
+        <section>
+          <h2>コレクション</h2>
+          <div id="collections" class="list"></div>
+        </section>
+      </aside>
+      <section class="content">
+        <div class="toolbar">
+          <h2>キャプチャ</h2>
+          <button id="reload" type="button">再読み込み</button>
+        </div>
+        <div id="captures" class="capture-grid"></div>
+      </section>
+      <aside class="detail">
+        <h2>詳細</h2>
+        <div id="detail-body" class="detail-body">キャプチャを選択してください。</div>
+      </aside>
+    </main>
+    <script src="/app.js"></script>
+  </body>
+</html>

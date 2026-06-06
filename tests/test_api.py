@@ -172,6 +172,14 @@ def test_api_exposes_archive_read_models(tmp_path: Path):
         "INSERT INTO collection_items (collection_id, capture_id) VALUES (?, ?)",
         (collection_id, capture_id),
     )
+    conn.execute(
+        """
+        INSERT INTO sharex_history (
+            id, file_path, type, host, url, tags
+        ) VALUES (1, ?, 'Image', 'example', 'https://example.test/capture.jpg', 'sharex')
+        """,
+        (str(capture_path),),
+    )
     conn.commit()
     conn.close()
 
@@ -219,9 +227,61 @@ def test_api_exposes_archive_read_models(tmp_path: Path):
     assert detail["subtitles"][0]["text"] == "変身シーン"
     assert detail["ocr_results"][0]["text"] == "アイキャッチ"
     assert detail["collections"][0]["name"] == "名シーン"
+    assert detail["sharex_history"][0]["url"] == "https://example.test/capture.jpg"
     assert subtitles["subtitles"][0]["cue_index"] == 1
     assert tags["tags"][0] == {"name": "SNS候補", "count": 1}
     assert collections["collections"][0]["capture_count"] == 1
+
+
+def test_api_serves_local_ui_and_capture_images(tmp_path: Path):
+    db_path = tmp_path / "api.db"
+    capture_path = tmp_path / "captures" / "capture.jpg"
+    capture_path.parent.mkdir()
+    image_bytes = b"\xff\xd8image\xff\xd9"
+    capture_path.write_bytes(image_bytes)
+    conn = connect(db_path)
+    init_db(conn)
+    conn.execute(
+        """
+        INSERT INTO captures (
+            path, filename, extension, size_bytes, captured_at, modified_at, source_hint
+        ) VALUES (?, 'capture.jpg', '.jpg', ?, '2026-06-06T01:05:00',
+                  '2026-06-06T01:05:00', 'capture')
+        """,
+        (str(capture_path), len(image_bytes)),
+    )
+    conn.commit()
+    conn.close()
+
+    server = AniCapShelfServer(
+        ("127.0.0.1", 0),
+        AniCapShelfRequestHandler,
+        db_path=str(db_path),
+        capture_output_root=tmp_path / "captures",
+        api_token="secret-token",
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        index_html = get_text(server.server_address[1], "/")
+        app_js = get_text(server.server_address[1], "/app.js")
+        try:
+            get_bytes(server.server_address[1], "/api/captures/1/image")
+        except urllib.error.HTTPError as exc:
+            assert exc.code == 401
+        else:
+            raise AssertionError("image API should require token when configured")
+        image_payload = get_bytes(
+            server.server_address[1], "/api/captures/1/image", api_token="secret-token"
+        )
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+    assert "AniCapShelf" in index_html
+    assert "/api/captures?limit=120" in app_js
+    assert image_payload == image_bytes
 
 
 def get_json(port: int, path: str, *, api_token: str | None = None) -> dict:
@@ -232,6 +292,22 @@ def get_json(port: int, path: str, *, api_token: str | None = None) -> dict:
     with urllib.request.urlopen(request, timeout=5) as response:
         assert response.status == 200
         return json.loads(response.read().decode("utf-8"))
+
+
+def get_text(port: int, path: str) -> str:
+    with urllib.request.urlopen(f"http://127.0.0.1:{port}{path}", timeout=5) as response:
+        assert response.status == 200
+        return response.read().decode("utf-8")
+
+
+def get_bytes(port: int, path: str, *, api_token: str | None = None) -> bytes:
+    headers = {}
+    if api_token:
+        headers["Authorization"] = f"Bearer {api_token}"
+    request = urllib.request.Request(f"http://127.0.0.1:{port}{path}", headers=headers)
+    with urllib.request.urlopen(request, timeout=5) as response:
+        assert response.status == 200
+        return response.read()
 
 
 def post_annotated_capture(

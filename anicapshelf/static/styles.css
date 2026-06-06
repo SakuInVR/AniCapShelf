@@ -1,0 +1,206 @@
+:root {
+  color-scheme: light;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: #f6f7f9;
+  color: #15171c;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+.topbar {
+  align-items: center;
+  background: #ffffff;
+  border-bottom: 1px solid #d9dde5;
+  display: flex;
+  gap: 24px;
+  justify-content: space-between;
+  padding: 16px 20px;
+}
+
+h1,
+h2,
+p {
+  margin: 0;
+}
+
+h1 {
+  font-size: 22px;
+}
+
+h2 {
+  font-size: 16px;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button {
+  background: #1f6feb;
+  border: 0;
+  border-radius: 6px;
+  color: #ffffff;
+  cursor: pointer;
+  padding: 8px 12px;
+}
+
+.token-field {
+  color: #596171;
+  display: grid;
+  font-size: 12px;
+  gap: 4px;
+  min-width: 220px;
+}
+
+.token-field input {
+  border: 1px solid #c6ccd7;
+  border-radius: 6px;
+  padding: 8px;
+}
+
+.layout {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: 240px minmax(0, 1fr) 340px;
+  padding: 16px;
+}
+
+.sidebar,
+.content,
+.detail {
+  min-width: 0;
+}
+
+.sidebar,
+.detail {
+  display: grid;
+  gap: 16px;
+  align-content: start;
+}
+
+.sidebar section,
+.detail,
+.content {
+  background: #ffffff;
+  border: 1px solid #dfe3ea;
+  border-radius: 8px;
+  padding: 14px;
+}
+
+.toolbar {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.capture-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+}
+
+.capture-card {
+  background: #ffffff;
+  border: 1px solid #dfe3ea;
+  border-radius: 8px;
+  cursor: pointer;
+  overflow: hidden;
+  text-align: left;
+  width: 100%;
+}
+
+.capture-card img {
+  aspect-ratio: 16 / 9;
+  background: #eef1f5;
+  display: block;
+  object-fit: cover;
+  width: 100%;
+}
+
+.capture-card .meta {
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+}
+
+.filename {
+  font-size: 13px;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+
+.subtext,
+#summary {
+  color: #596171;
+  font-size: 13px;
+}
+
+.pill-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.pill {
+  background: #edf3ff;
+  border-radius: 999px;
+  color: #164ea6;
+  font-size: 12px;
+  padding: 5px 8px;
+}
+
+.list {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.list-item {
+  border-bottom: 1px solid #edf0f5;
+  padding-bottom: 8px;
+}
+
+.detail-body {
+  display: grid;
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.detail-body img {
+  border-radius: 8px;
+  max-width: 100%;
+}
+
+.kv {
+  display: grid;
+  gap: 4px;
+}
+
+.kv span {
+  color: #596171;
+  font-size: 12px;
+}
+
+.error {
+  color: #b42318;
+}
+
+@media (max-width: 980px) {
+  .layout {
+    grid-template-columns: 1fr;
+  }
+
+  .topbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
