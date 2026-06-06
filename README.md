@@ -138,6 +138,13 @@ python -m anicapshelf --db .\anicapshelf.db probe-recording-streams --limit 100
 python -m anicapshelf --db .\anicapshelf.db extract-subtitles --recording-id 1 --seconds 120 --max-cues 50
 ```
 
+字幕ありとして検出済みで、まだ字幕DBがない録画だけをまとめて処理します。
+失敗した録画があっても次の録画へ進みます。
+
+```powershell
+python -m anicapshelf --db .\anicapshelf.db extract-subtitles-batch --only-with-arib --only-missing --seconds 1800 --verbose
+```
+
 ShareX の履歴を取り込みます。
 
 ```powershell

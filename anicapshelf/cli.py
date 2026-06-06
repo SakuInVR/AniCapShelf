@@ -422,30 +422,128 @@ def cmd_extract_subtitles(args: argparse.Namespace) -> None:
     if row is None:
         raise SystemExit(f"recording not found: {args.recording_id}")
     try:
-        if args.max_cues:
-            raw = extract_srt_preview(
-                row["path"], seconds=args.seconds, max_cues=args.max_cues, timeout=args.timeout
-            )
-        else:
-            raw = extract_srt(row["path"], args.seconds, args.timeout)
+        subtitles = extract_and_store_subtitles(
+            conn,
+            recording_id=row["id"],
+            recording_path=row["path"],
+            seconds=args.seconds,
+            timeout=args.timeout,
+            max_cues=args.max_cues,
+        )
     except TimeoutError as exc:
+        conn.close()
         raise SystemExit(str(exc)) from exc
+    conn.commit()
+    conn.close()
+    print(f"subtitles extracted: {len(subtitles)}")
+    for item in subtitles[: args.preview]:
+        print(f"{item['start']:.3f}: {item['text']}")
+
+
+def extract_and_store_subtitles(
+    conn: sqlite3.Connection,
+    *,
+    recording_id: int,
+    recording_path: str,
+    seconds: int | None,
+    timeout: int,
+    max_cues: int,
+) -> list[dict]:
+    if max_cues:
+        raw = extract_srt_preview(
+            recording_path, seconds=seconds, max_cues=max_cues, timeout=timeout
+        )
+    else:
+        raw = extract_srt(recording_path, seconds, timeout)
     subtitles = parse_srt(raw)
-    conn.execute("DELETE FROM subtitles WHERE recording_id = ?", (row["id"],))
+    conn.execute("DELETE FROM subtitles WHERE recording_id = ?", (recording_id,))
     conn.executemany(
         """
         INSERT INTO subtitles (recording_id, start_seconds, end_seconds, text, raw_text, source)
         VALUES (?, ?, ?, ?, ?, 'arib_caption')
         """,
         [
-            (row["id"], item["start"], item["end"], item["text"], item["raw_text"])
+            (recording_id, item["start"], item["end"], item["text"], item["raw_text"])
             for item in subtitles
         ],
     )
+    return subtitles
+
+
+def cmd_extract_subtitles_batch(args: argparse.Namespace) -> None:
+    if args.commit_every < 1:
+        raise SystemExit("--commit-every must be 1 or greater")
+    conn = connect(args.db)
+    init_db(conn)
+    where = ["r.path IS NOT NULL"]
+    if args.only_with_arib:
+        where.append("r.has_arib_caption = 1")
+    if args.only_missing:
+        where.append(
+            """
+            NOT EXISTS (
+                SELECT 1 FROM subtitles s WHERE s.recording_id = r.id
+            )
+            """
+        )
+    params: list[object] = []
+    query = f"""
+        SELECT r.id, r.path, r.title
+        FROM recordings r
+        WHERE {' AND '.join(where)}
+        ORDER BY r.id
+    """
+    if args.limit:
+        query += " LIMIT ?"
+        params.append(args.limit)
+    rows = conn.execute(query, params).fetchall()
+    processed = 0
+    extracted = 0
+    skipped = 0
+    failed = 0
+    for row in rows:
+        path = Path(row["path"])
+        if not path.exists():
+            skipped += 1
+            if args.verbose:
+                print(f"skip missing file: {row['id']}\t{row['path']}")
+            continue
+        processed += 1
+        conn.execute("SAVEPOINT subtitle_recording")
+        try:
+            subtitles = extract_and_store_subtitles(
+                conn,
+                recording_id=row["id"],
+                recording_path=row["path"],
+                seconds=args.seconds,
+                timeout=args.timeout,
+                max_cues=args.max_cues,
+            )
+        except TimeoutError as exc:
+            failed += 1
+            conn.execute("ROLLBACK TO subtitle_recording")
+            conn.execute("RELEASE subtitle_recording")
+            print(f"failed: {row['id']}\t{exc}")
+            continue
+        except RuntimeError as exc:
+            failed += 1
+            conn.execute("ROLLBACK TO subtitle_recording")
+            conn.execute("RELEASE subtitle_recording")
+            print(f"failed: {row['id']}\t{exc}")
+            continue
+        conn.execute("RELEASE subtitle_recording")
+        extracted += len(subtitles)
+        if args.verbose:
+            print(f"extracted: {row['id']}\t{len(subtitles)}\t{row['title'] or path.name}")
+        if processed % args.commit_every == 0:
+            conn.commit()
     conn.commit()
-    print(f"subtitles extracted: {len(subtitles)}")
-    for item in subtitles[: args.preview]:
-        print(f"{item['start']:.3f}: {item['text']}")
+    conn.close()
+    print(f"recordings selected: {len(rows)}")
+    print(f"recordings processed: {processed}")
+    print(f"recordings skipped: {skipped}")
+    print(f"recordings failed: {failed}")
+    print(f"subtitles extracted: {extracted}")
 
 
 def cmd_import_sharex(args: argparse.Namespace) -> None:
@@ -1272,6 +1370,17 @@ def build_parser() -> argparse.ArgumentParser:
     extract.add_argument("--max-cues", type=int, default=0)
     extract.add_argument("--preview", type=int, default=10)
     extract.set_defaults(func=cmd_extract_subtitles)
+
+    extract_batch = sub.add_parser("extract-subtitles-batch")
+    extract_batch.add_argument("--limit", type=int)
+    extract_batch.add_argument("--seconds", type=int, default=120)
+    extract_batch.add_argument("--timeout", type=int, default=180)
+    extract_batch.add_argument("--max-cues", type=int, default=0)
+    extract_batch.add_argument("--commit-every", type=int, default=10)
+    extract_batch.add_argument("--only-with-arib", action="store_true")
+    extract_batch.add_argument("--only-missing", action="store_true")
+    extract_batch.add_argument("--verbose", action="store_true")
+    extract_batch.set_defaults(func=cmd_extract_subtitles_batch)
 
     sharex = sub.add_parser("import-sharex")
     sharex.add_argument("--history-db")

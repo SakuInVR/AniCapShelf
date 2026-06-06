@@ -85,6 +85,135 @@ def test_scan_records_preserves_existing_caption_probe(tmp_path: Path, capsys):
     assert value == 1
 
 
+def test_extract_subtitles_batch_extracts_missing_caption_recordings(
+    tmp_path: Path, capsys, monkeypatch
+):
+    import sqlite3
+
+    db_path = tmp_path / "test.db"
+    recording_with_caption = tmp_path / "caption.m2ts"
+    recording_without_caption = tmp_path / "no-caption.m2ts"
+    recording_with_caption.write_bytes(b"recording")
+    recording_without_caption.write_bytes(b"recording")
+
+    from anicapshelf.db import connect, init_db
+
+    conn = connect(db_path)
+    init_db(conn)
+    conn.execute(
+        """
+        INSERT INTO recordings (
+            path, filename, extension, size_bytes, title, has_arib_caption
+        ) VALUES (?, 'caption.m2ts', '.m2ts', 1, '字幕あり', 1)
+        """,
+        (str(recording_with_caption),),
+    )
+    conn.execute(
+        """
+        INSERT INTO recordings (
+            path, filename, extension, size_bytes, title, has_arib_caption
+        ) VALUES (?, 'no-caption.m2ts', '.m2ts', 1, '字幕なし', 0)
+        """,
+        (str(recording_without_caption),),
+    )
+    conn.commit()
+    conn.close()
+
+    def fake_extract_srt(path, seconds=None, timeout=180):
+        assert Path(path) == recording_with_caption
+        return (
+            "1\n"
+            "00:00:01,000 --> 00:00:03,000\n"
+            "ほむらちゃん\n\n"
+        )
+
+    monkeypatch.setattr("anicapshelf.cli.extract_srt", fake_extract_srt)
+
+    main(
+        [
+            "--db",
+            str(db_path),
+            "extract-subtitles-batch",
+            "--only-with-arib",
+            "--only-missing",
+        ]
+    )
+    output = capsys.readouterr().out
+
+    con = sqlite3.connect(db_path)
+    rows = con.execute(
+        """
+        SELECT r.title, s.text
+        FROM subtitles s
+        JOIN recordings r ON r.id = s.recording_id
+        """
+    ).fetchall()
+    con.close()
+
+    assert "recordings selected: 1" in output
+    assert "recordings processed: 1" in output
+    assert "subtitles extracted: 1" in output
+    assert rows == [("字幕あり", "ほむらちゃん")]
+
+
+def test_extract_subtitles_batch_keeps_successes_when_later_recording_fails(
+    tmp_path: Path, capsys, monkeypatch
+):
+    import sqlite3
+
+    db_path = tmp_path / "test.db"
+    first = tmp_path / "first.m2ts"
+    second = tmp_path / "second.m2ts"
+    first.write_bytes(b"recording")
+    second.write_bytes(b"recording")
+
+    from anicapshelf.db import connect, init_db
+
+    conn = connect(db_path)
+    init_db(conn)
+    for path, title in [(first, "成功"), (second, "失敗")]:
+        conn.execute(
+            """
+            INSERT INTO recordings (
+                path, filename, extension, size_bytes, title, has_arib_caption
+            ) VALUES (?, ?, '.m2ts', 1, ?, 1)
+            """,
+            (str(path), path.name, title),
+        )
+    conn.commit()
+    conn.close()
+
+    def fake_extract_srt(path, seconds=None, timeout=180):
+        if Path(path) == second:
+            raise TimeoutError("timeout")
+        return (
+            "1\n"
+            "00:00:01,000 --> 00:00:03,000\n"
+            "保存される字幕\n\n"
+        )
+
+    monkeypatch.setattr("anicapshelf.cli.extract_srt", fake_extract_srt)
+
+    main(
+        [
+            "--db",
+            str(db_path),
+            "extract-subtitles-batch",
+            "--only-with-arib",
+            "--commit-every",
+            "2",
+        ]
+    )
+    output = capsys.readouterr().out
+
+    con = sqlite3.connect(db_path)
+    rows = con.execute("SELECT text FROM subtitles").fetchall()
+    con.close()
+
+    assert "recordings failed: 1" in output
+    assert rows == [("保存される字幕",)]
+
+
 def test_review_unmatched_outputs_indexed_capture(tmp_path: Path, capsys):
     captures_root = tmp_path / "captures"
     captures_root.mkdir()
