@@ -77,6 +77,14 @@ python -m anicapshelf --db .\anicapshelf.db show-capture 1
 python -m anicapshelf --db .\anicapshelf.db show-capture 1 --format json
 ```
 
+既存キャプチャに対して、`match` で選ばれた最有力録画候補から後追いの
+アノテーションを作ります。古いスクリーンショットも、新しい
+キャプチャ同時アノテートと近い形で `show-capture` から確認できます。
+
+```powershell
+python -m anicapshelf --db .\anicapshelf.db backfill-annotations --tag 後追い
+```
+
 KonomiTV などの外部ツールから、画像とメタデータを同時保存するローカルAPIを
 起動します。`--capture-output-root` を省略した場合は、設定ファイルの
 `roots.captures` を保存先として使います。

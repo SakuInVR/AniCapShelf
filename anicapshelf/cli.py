@@ -8,6 +8,7 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 
+from .annotations import annotate_existing_capture
 from .api import run_server
 from .config import load_config
 from .db import connect, init_db
@@ -687,6 +688,82 @@ def cmd_show_capture(args: argparse.Namespace) -> None:
     print_capture_detail(detail)
 
 
+def cmd_backfill_annotations(args: argparse.Namespace) -> None:
+    conn = connect(args.db)
+    init_db(conn)
+    rows = conn.execute(
+        """
+        SELECT
+            c.id AS capture_id,
+            c.captured_at,
+            c.path AS capture_path,
+            m.source_time_seconds,
+            m.confidence,
+            r.id AS recording_id,
+            r.path AS recording_path,
+            r.title,
+            r.normalized_title,
+            r.series_title,
+            r.episode_number,
+            r.subtitle,
+            r.start_at,
+            r.end_at
+        FROM captures c
+        JOIN capture_recording_matches m ON m.capture_id = c.id
+        JOIN recordings r ON r.id = m.recording_id
+        LEFT JOIN capture_annotations a
+          ON a.capture_id = c.id
+         AND a.source_app = 'AniCapShelfBackfill'
+        WHERE m.is_best = 1
+          AND a.id IS NULL
+        ORDER BY c.id
+        LIMIT ?
+        """,
+        (args.limit,),
+    ).fetchall()
+    created = 0
+    subtitle_links = 0
+    for row in rows:
+        metadata = {
+            "source_app": "AniCapShelfBackfill",
+            "captured_at": row["captured_at"],
+            "capture_path": row["capture_path"],
+            "recorded_program_id": row["recording_id"],
+            "recording_file_path": row["recording_path"],
+            "playback_position_seconds": row["source_time_seconds"],
+            "match_confidence": row["confidence"],
+            "title": row["title"],
+            "normalized_title": row["normalized_title"],
+            "series_title": row["series_title"],
+            "episode_number": row["episode_number"],
+            "subtitle": row["subtitle"],
+            "start_time": row["start_at"],
+            "end_time": row["end_at"],
+        }
+        result = annotate_existing_capture(
+            conn,
+            capture_id=row["capture_id"],
+            metadata=metadata,
+            tags=args.tag,
+            note=args.note,
+        )
+        created += 1
+        subtitle_links += result.subtitle_links
+        if args.verbose:
+            print(
+                "\t".join(
+                    [
+                        str(result.capture_id),
+                        row["title"] or "",
+                        str(row["source_time_seconds"]),
+                        row["recording_path"],
+                    ]
+                )
+            )
+    print(f"backfill annotations created: {created}")
+    print(f"subtitle links created: {subtitle_links}")
+
+
 def print_capture_detail(detail: dict) -> None:
     capture = detail["capture"]
     print(f"capture_id: {capture['id']}")
@@ -939,6 +1016,13 @@ def build_parser() -> argparse.ArgumentParser:
     show_capture.add_argument("capture_id", type=int)
     show_capture.add_argument("--format", choices=["text", "json"], default="text")
     show_capture.set_defaults(func=cmd_show_capture)
+
+    backfill = sub.add_parser("backfill-annotations")
+    backfill.add_argument("--limit", type=int, default=100)
+    backfill.add_argument("--tag", action="append", default=[])
+    backfill.add_argument("--note")
+    backfill.add_argument("--verbose", action="store_true")
+    backfill.set_defaults(func=cmd_backfill_annotations)
 
     export = sub.add_parser("export")
     export.add_argument(

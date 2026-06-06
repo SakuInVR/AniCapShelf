@@ -20,6 +20,13 @@ class AnnotationResult:
     image_path: Path
 
 
+@dataclass(frozen=True)
+class ExistingCaptureAnnotationResult:
+    capture_id: int
+    annotation_id: int
+    subtitle_links: int
+
+
 def save_annotated_capture(
     conn: sqlite3.Connection,
     *,
@@ -106,6 +113,53 @@ def save_annotated_capture(
         capture_id=capture_id,
         annotation_id=int(annotation_cursor.lastrowid),
         image_path=image_path,
+    )
+
+
+def annotate_existing_capture(
+    conn: sqlite3.Connection,
+    *,
+    capture_id: int,
+    metadata: dict,
+    tags: list[str] | None = None,
+    note: str | None = None,
+    source_app: str = "AniCapShelfBackfill",
+) -> ExistingCaptureAnnotationResult:
+    capture = conn.execute("SELECT id FROM captures WHERE id = ?", (capture_id,)).fetchone()
+    if capture is None:
+        raise ValueError(f"capture not found: {capture_id}")
+    metadata = dict(metadata)
+    metadata.setdefault("source_app", source_app)
+    normalized_tags = normalize_tags(tags or [])
+    tags_json = json.dumps(normalized_tags, ensure_ascii=False)
+    metadata_json = json.dumps(metadata, ensure_ascii=False, sort_keys=True)
+    annotation_cursor = conn.execute(
+        """
+        INSERT INTO capture_annotations (
+            capture_id, source_app, external_program_id, external_video_id,
+            recording_file_path, playback_position_seconds, source_url,
+            tags_json, note, metadata_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            capture_id,
+            str(metadata.get("source_app") or source_app),
+            optional_text(metadata.get("recorded_program_id")),
+            optional_text(metadata.get("recorded_video_id")),
+            optional_text(metadata.get("recording_file_path")),
+            optional_float(metadata.get("playback_position_seconds")),
+            optional_text(metadata.get("konomitv_url") or metadata.get("source_url")),
+            tags_json,
+            note,
+            metadata_json,
+        ),
+    )
+    linked = attach_nearby_subtitles(conn, capture_id=capture_id, metadata=metadata)
+    conn.commit()
+    return ExistingCaptureAnnotationResult(
+        capture_id=capture_id,
+        annotation_id=int(annotation_cursor.lastrowid),
+        subtitle_links=linked,
     )
 
 

@@ -239,3 +239,69 @@ def test_annotated_capture_links_nearby_subtitles(tmp_path: Path, capsys):
     assert "ちょうど近いセリフ" in output
     assert "少し前のセリフ" in output
     assert "遠いセリフ" not in output
+
+
+def test_backfill_annotations_from_best_match(tmp_path: Path, capsys):
+    db_path = tmp_path / "test.db"
+    conn = connect(db_path)
+    init_db(conn)
+    capture_path = tmp_path / "captures" / "capture.jpg"
+    recording_path = tmp_path / "records" / "anime.ts"
+    capture_path.parent.mkdir()
+    recording_path.parent.mkdir()
+    capture_path.write_bytes(b"capture")
+    recording_path.write_bytes(b"recording")
+    conn.execute(
+        """
+        INSERT INTO captures (
+            path, filename, extension, size_bytes, captured_at, modified_at, source_hint
+        ) VALUES (?, 'capture.jpg', '.jpg', 7, '2026-06-06T01:05:00', '2026-06-06T01:05:00', 'capture')
+        """,
+        (str(capture_path),),
+    )
+    conn.execute(
+        """
+        INSERT INTO recordings (
+            path, filename, extension, size_bytes, start_at, end_at, duration_seconds,
+            title, normalized_title, series_title, episode_number, subtitle
+        ) VALUES (?, 'anime.ts', '.ts', 9, '2026-06-06T01:00:00', '2026-06-06T01:30:00',
+            1800, '作品名　第5話　サブタイトル', '作品名 第5話 サブタイトル',
+            '作品名', 5, 'サブタイトル')
+        """,
+        (str(recording_path),),
+    )
+    capture_id = conn.execute("SELECT id FROM captures").fetchone()["id"]
+    recording_id = conn.execute("SELECT id FROM recordings").fetchone()["id"]
+    conn.execute(
+        """
+        INSERT INTO capture_recording_matches (
+            capture_id, recording_id, source_time_seconds, confidence, is_best, method
+        ) VALUES (?, ?, 300.0, 0.9, 1, 'time-window')
+        """,
+        (capture_id, recording_id),
+    )
+    conn.commit()
+    conn.close()
+
+    main(
+        [
+            "--db",
+            str(db_path),
+            "backfill-annotations",
+            "--tag",
+            "後追い",
+            "--note",
+            "既存キャプチャから復元",
+        ]
+    )
+    backfill_output = capsys.readouterr().out
+    assert "backfill annotations created: 1" in backfill_output
+
+    main(["--db", str(db_path), "show-capture", str(capture_id)])
+    output = capsys.readouterr().out
+
+    assert "source_app: AniCapShelfBackfill" in output
+    assert "playback_position_seconds: 300.0" in output
+    assert f"recording_file_path: {recording_path}" in output
+    assert "tags: 後追い" in output
+    assert "note: 既存キャプチャから復元" in output
